@@ -104,8 +104,12 @@ app.get("/", (req, res) => {
 // AUTH — signup & login
 // ============================================================
 
+function generateReferralCode() {
+  return crypto.randomBytes(4).toString("hex").toUpperCase();
+}
+
 app.post("/api/auth/signup", async (req, res) => {
-  const { name, email, password } = req.body;
+  const { name, email, password, referralCode } = req.body;
   if (!name || !email || !password) {
     return res.status(400).json({ error: "name, email and password are required" });
   }
@@ -113,6 +117,12 @@ app.post("/api/auth/signup", async (req, res) => {
   const users = await db.users.all();
   if (users.find((u) => u.email.toLowerCase() === email.toLowerCase())) {
     return res.status(409).json({ error: "An account with that email already exists" });
+  }
+
+  let referredBy = null;
+  if (referralCode) {
+    const referrer = users.find((u) => u.referralCode === referralCode.toUpperCase());
+    if (referrer) referredBy = referrer.id;
   }
 
   const newUser = {
@@ -123,6 +133,9 @@ app.post("/api/auth/signup", async (req, res) => {
     walletBalance: 0,
     isAdmin: users.length === 0, // first person to sign up becomes admin
     purchasedItemIds: [],
+    referralCode: generateReferralCode(),
+    referredBy,
+    referralRewardProcessed: false,
     createdAt: new Date().toISOString(),
   };
 
@@ -135,7 +148,7 @@ app.post("/api/auth/signup", async (req, res) => {
     user: publicUser(newUser),
   });
 });
-
+  
 app.post("/api/auth/login", async (req, res) => {
   const { email, password } = req.body;
   const users = await db.users.all();
