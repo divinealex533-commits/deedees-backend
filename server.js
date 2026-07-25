@@ -181,18 +181,15 @@ app.get("/api/my-orders", requireAuth, async (req, res) => {
   const [purchases, items] = await Promise.all([db.purchases.all(), db.items.all()]);
   const myPurchases = purchases.filter((p) => p.buyerId === req.user.id);
 
-  const orders = myPurchases.map((p) => {
-    const item = items.find((i) => i.id === p.itemId);
-    return {
-      ...(item || {}),
-      orderId: p.id,
-      price: p.price,
-      purchasedAt: p.createdAt,
-    };
-  });
+  const orders = myPurchases.map((p) => ({
+    id: p.id,
+    purchasedAt: p.createdAt,
+    price: p.price,
+    item: items.find((i) => i.id === p.itemId) || null,
+  }));
 
-  res.json(orders);
-});
+  res.json({ orders });
+});    
 // ============================================================
 // ITEMS — browsing the marketplace (public — accessLink stripped)
 // ============================================================
