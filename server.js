@@ -175,7 +175,24 @@ app.get("/api/me", requireAuth, async (req, res) => {
     purchasedItems,
   });
 });
+// Customer: their own purchase history, including accessLink for
+// each item (ebook link / credentials) since they've paid for it.
+app.get("/api/my-orders", requireAuth, async (req, res) => {
+  const [purchases, items] = await Promise.all([db.purchases.all(), db.items.all()]);
+  const myPurchases = purchases.filter((p) => p.buyerId === req.user.id);
 
+  const orders = myPurchases.map((p) => {
+    const item = items.find((i) => i.id === p.itemId);
+    return {
+      ...(item || {}),
+      orderId: p.id,
+      price: p.price,
+      purchasedAt: p.createdAt,
+    };
+  });
+
+  res.json(orders);
+});
 // ============================================================
 // ITEMS — browsing the marketplace (public — accessLink stripped)
 // ============================================================
