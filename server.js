@@ -175,6 +175,7 @@ app.get("/api/me", requireAuth, async (req, res) => {
     purchasedItems,
   });
 });
+
 // Customer: their own purchase history, including accessLink for
 // each item (ebook link / credentials) since they've paid for it.
 app.get("/api/my-orders", requireAuth, async (req, res) => {
@@ -189,7 +190,8 @@ app.get("/api/my-orders", requireAuth, async (req, res) => {
   }));
 
   res.json({ orders });
-});    
+});
+
 // ============================================================
 // ITEMS — browsing the marketplace (public — accessLink stripped)
 // ============================================================
@@ -218,13 +220,15 @@ app.get("/api/admin/items", requireAuth, requireAdmin, async (req, res) => {
 });
 
 // Admin: add a new item to sell. Accepts an optional accessLink
-// (ebook link / login credentials) that only a buyer will ever see.
+// (ebook link / login credentials) that only a buyer will ever see,
+// and a quantity for how many copies/units are available.
 app.post("/api/items", requireAuth, requireAdmin, async (req, res) => {
-  const { name, description, price, image, imageUrl, categoryId, inStock, accessLink } = req.body;
+  const { name, description, price, image, imageUrl, categoryId, inStock, accessLink, quantity } = req.body;
   if (!name || price == null) {
     return res.status(400).json({ error: "name and price are required" });
   }
 
+  const qty = quantity != null ? Number(quantity) : 1;
   const items = await db.items.all();
   const newItem = {
     id: crypto.randomUUID(),
@@ -233,7 +237,8 @@ app.post("/api/items", requireAuth, requireAdmin, async (req, res) => {
     price,
     imageUrl: imageUrl || image || "",
     categoryId: categoryId || null,
-    inStock: inStock !== undefined ? inStock : true,
+    quantity: qty,
+    inStock: inStock !== undefined ? inStock : qty > 0,
     sold: false,
     accessLink: accessLink || "",
     createdAt: new Date().toISOString(),
@@ -245,21 +250,25 @@ app.post("/api/items", requireAuth, requireAdmin, async (req, res) => {
 });
 
 // Admin: update an existing item — name, price, category, image,
-// stock status, and/or accessLink (ebook link / credentials).
+// stock quantity, and/or accessLink (ebook link / credentials).
 app.put("/api/items/:id", requireAuth, requireAdmin, async (req, res) => {
   const items = await db.items.all();
   const item = items.find((i) => i.id === req.params.id);
   if (!item) return res.status(404).json({ error: "Item not found" });
 
-  const { name, description, price, image, imageUrl, categoryId, inStock, accessLink } = req.body;
+  const { name, description, price, image, imageUrl, categoryId, inStock, accessLink, quantity } = req.body;
   if (name !== undefined) item.name = name;
   if (description !== undefined) item.description = description;
   if (price !== undefined) item.price = price;
   if (imageUrl !== undefined) item.imageUrl = imageUrl;
   else if (image !== undefined) item.imageUrl = image;
   if (categoryId !== undefined) item.categoryId = categoryId;
-  if (inStock !== undefined) item.inStock = inStock;
   if (accessLink !== undefined) item.accessLink = accessLink;
+  if (quantity !== undefined) {
+    item.quantity = Number(quantity);
+    item.inStock = item.quantity > 0;
+  }
+  if (inStock !== undefined) item.inStock = inStock;
 
   await db.items.save(items);
   res.json(item);
@@ -440,28 +449,45 @@ app.post("/api/admin/deposits/:id/reject", requireAuth, requireAdmin, async (req
 });
 
 // ============================================================
-// PURCHASE — spend wallet balance to buy an item
+// PURCHASE — spend wallet balance to buy an item (supports quantity)
 // ============================================================
 
 app.post("/api/purchase", requireAuth, async (req, res) => {
-  const { itemId } = req.body;
+  const { itemId, quantity } = req.body;
   if (!itemId) return res.status(400).json({ error: "itemId is required" });
+
+  const qtyToBuy = quantity != null ? Number(quantity) : 1;
+  if (qtyToBuy < 1) return res.status(400).json({ error: "Quantity must be at least 1" });
 
   const items = await db.items.all();
   const item = items.find((i) => i.id === itemId);
   if (!item) return res.status(404).json({ error: "Item not found" });
-  if (item.sold) return res.status(400).json({ error: "Item already sold" });
+
+  const availableQty = item.quantity != null ? item.quantity : (item.sold ? 0 : 1);
+  if (availableQty < qtyToBuy) {
+    return res.status(400).json({ error: `Only ${availableQty} left in stock` });
+  }
+
+  const totalPrice = item.price * qtyToBuy;
 
   const users = await db.users.all();
   const user = users.find((u) => u.id === req.user.id);
-  if (user.walletBalance < item.price) {
+  if (user.walletBalance < totalPrice) {
     return res.status(400).json({ error: "Insufficient wallet balance" });
   }
 
-  user.walletBalance -= item.price;
-  user.purchasedItemIds.push(item.id);
-  item.sold = true;
-  item.ownerId = user.id;
+  user.walletBalance -= totalPrice;
+  if (!user.purchasedItemIds.includes(item.id)) {
+    user.purchasedItemIds.push(item.id);
+  }
+
+  if (item.quantity != null) {
+    item.quantity -= qtyToBuy;
+    item.inStock = item.quantity > 0;
+  } else {
+    item.sold = true;
+    item.inStock = false;
+  }
 
   await db.users.save(users);
   await db.items.save(items);
@@ -473,7 +499,8 @@ app.post("/api/purchase", requireAuth, async (req, res) => {
     buyerId: user.id,
     buyerName: user.name,
     buyerEmail: user.email,
-    price: item.price,
+    price: totalPrice,
+    quantity: qtyToBuy,
     createdAt: new Date().toISOString(),
   });
   await db.purchases.save(purchases);
@@ -485,28 +512,8 @@ app.post("/api/purchase", requireAuth, async (req, res) => {
   });
 });
 
-// Customer: see their own order history — each order includes the full
-// item (accessLink included), since accessLink is only ever safe to
-// show to the person who actually bought that item.
-app.get("/api/my-orders", requireAuth, async (req, res) => {
-  const [purchases, items] = await Promise.all([db.purchases.all(), db.items.all()]);
-
-  const myPurchases = purchases
-    .filter((p) => p.buyerId === req.user.id)
-    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-
-  const orders = myPurchases.map((p) => ({
-    id: p.id,
-    purchasedAt: p.createdAt,
-    price: p.price,
-    item: items.find((i) => i.id === p.itemId) || null,
-  }));
-
-  res.json({ orders });
-});
-
 // Admin: full sales history (used by the Sales tab in the dashboard)
-app.get("/api/sales", requireAuth, requireAdmin, async (req, res) => {
+app.get("/api/admin/sales", requireAuth, requireAdmin, async (req, res) => {
   const [purchases, items] = await Promise.all([db.purchases.all(), db.items.all()]);
   const sales = purchases.map((p) => {
     const item = items.find((i) => i.id === p.itemId);
