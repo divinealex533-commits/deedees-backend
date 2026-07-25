@@ -30,7 +30,7 @@ app.use(cors());
 app.post(
   "/api/webhooks/paystack",
   express.raw({ type: "application/json" }),
-  (req, res) => {
+  async (req, res) => {
     const signature = req.headers["x-paystack-signature"];
     const expected = crypto
       .createHmac("sha512", process.env.PAYSTACK_SECRET_KEY || "")
@@ -44,7 +44,7 @@ app.post(
     const event = JSON.parse(req.body.toString());
 
     if (event.event === "charge.success") {
-      creditDepositByReference(event.data.reference, event.data.amount / 100);
+      await creditDepositByReference(event.data.reference, event.data.amount / 100);
     }
 
     res.sendStatus(200);
@@ -70,19 +70,19 @@ const upload = multer({
 // Credits a wallet exactly once for a given deposit reference.
 // Used by both the webhook and the verify endpoint so a payment
 // can never be credited twice.
-function creditDepositByReference(reference, amountNaira) {
-  const deposits = db.deposits.all();
+async function creditDepositByReference(reference, amountNaira) {
+  const deposits = await db.deposits.all();
   const deposit = deposits.find((d) => d.reference === reference);
   if (!deposit || deposit.status === "completed") return; // already handled
 
   deposit.status = "completed";
-  db.deposits.save(deposits);
+  await db.deposits.save(deposits);
 
-  const users = db.users.all();
+  const users = await db.users.all();
   const user = users.find((u) => u.id === deposit.userId);
   if (user) {
     user.walletBalance += amountNaira;
-    db.users.save(users);
+    await db.users.save(users);
   }
 }
 
@@ -97,13 +97,13 @@ app.get("/", (req, res) => {
 // AUTH — signup & login
 // ============================================================
 
-app.post("/api/auth/signup", (req, res) => {
+app.post("/api/auth/signup", async (req, res) => {
   const { name, email, password } = req.body;
   if (!name || !email || !password) {
     return res.status(400).json({ error: "name, email and password are required" });
   }
 
-  const users = db.users.all();
+  const users = await db.users.all();
   if (users.find((u) => u.email.toLowerCase() === email.toLowerCase())) {
     return res.status(409).json({ error: "An account with that email already exists" });
   }
@@ -120,7 +120,7 @@ app.post("/api/auth/signup", (req, res) => {
   };
 
   users.push(newUser);
-  db.users.save(users);
+  await db.users.save(users);
 
   const token = createToken(newUser);
   res.status(201).json({
@@ -129,9 +129,9 @@ app.post("/api/auth/signup", (req, res) => {
   });
 });
 
-app.post("/api/auth/login", (req, res) => {
+app.post("/api/auth/login", async (req, res) => {
   const { email, password } = req.body;
-  const users = db.users.all();
+  const users = await db.users.all();
   const user = users.find((u) => u.email.toLowerCase() === (email || "").toLowerCase());
 
   if (!user || !checkPassword(password || "", user.passwordHash)) {
@@ -151,12 +151,12 @@ function publicUser(user) {
 // DASHBOARD — logged-in user's own info
 // ============================================================
 
-app.get("/api/me", requireAuth, (req, res) => {
-  const users = db.users.all();
+app.get("/api/me", requireAuth, async (req, res) => {
+  const users = await db.users.all();
   const user = users.find((u) => u.id === req.user.id);
   if (!user) return res.status(404).json({ error: "User not found" });
 
-  const items = db.items.all();
+  const items = await db.items.all();
   const purchasedItems = items.filter((i) => user.purchasedItemIds.includes(i.id));
 
   res.json({
@@ -169,26 +169,26 @@ app.get("/api/me", requireAuth, (req, res) => {
 // ITEMS — browsing the marketplace
 // ============================================================
 
-app.get("/api/items", (req, res) => {
-  const items = db.items.all();
+app.get("/api/items", async (req, res) => {
+  const items = await db.items.all();
   res.json(items);
 });
 
-app.get("/api/items/:id", (req, res) => {
-  const items = db.items.all();
+app.get("/api/items/:id", async (req, res) => {
+  const items = await db.items.all();
   const item = items.find((i) => i.id === req.params.id);
   if (!item) return res.status(404).json({ error: "Item not found" });
   res.json(item);
 });
 
 // Admin: add a new item to sell
-app.post("/api/items", requireAuth, requireAdmin, (req, res) => {
+app.post("/api/items", requireAuth, requireAdmin, async (req, res) => {
   const { name, description, price, image } = req.body;
   if (!name || price == null) {
     return res.status(400).json({ error: "name and price are required" });
   }
 
-  const items = db.items.all();
+  const items = await db.items.all();
   const newItem = {
     id: crypto.randomUUID(),
     name,
@@ -200,7 +200,7 @@ app.post("/api/items", requireAuth, requireAdmin, (req, res) => {
   };
 
   items.push(newItem);
-  db.items.save(items);
+  await db.items.save(items);
   res.status(201).json(newItem);
 });
 
@@ -221,7 +221,7 @@ app.post("/api/wallet/deposit/instant/initialize", requireAuth, async (req, res)
     return res.status(400).json({ error: "A positive amount is required" });
   }
 
-  const users = db.users.all();
+  const users = await db.users.all();
   const user = users.find((u) => u.id === req.user.id);
   const reference = `dep_${crypto.randomUUID()}`;
 
@@ -233,7 +233,7 @@ app.post("/api/wallet/deposit/instant/initialize", requireAuth, async (req, res)
       callback_url: process.env.PAYSTACK_CALLBACK_URL, // where Paystack sends them back after paying
     });
 
-    const deposits = db.deposits.all();
+    const deposits = await db.deposits.all();
     deposits.push({
       id: crypto.randomUUID(),
       userId: user.id,
@@ -243,7 +243,7 @@ app.post("/api/wallet/deposit/instant/initialize", requireAuth, async (req, res)
       reference,
       createdAt: new Date().toISOString(),
     });
-    db.deposits.save(deposits);
+    await db.deposits.save(deposits);
 
     res.status(201).json({
       authorizationUrl: paystackData.authorization_url,
@@ -262,10 +262,10 @@ app.get("/api/wallet/deposit/instant/verify/:reference", requireAuth, async (req
   try {
     const result = await verifyTransaction(req.params.reference);
     if (result.status === "success") {
-      creditDepositByReference(req.params.reference, result.amount / 100);
+      await creditDepositByReference(req.params.reference, result.amount / 100);
     }
 
-    const users = db.users.all();
+    const users = await db.users.all();
     const user = users.find((u) => u.id === req.user.id);
     res.json({ paymentStatus: result.status, walletBalance: user.walletBalance });
   } catch (err) {
@@ -281,7 +281,7 @@ app.post(
   "/api/wallet/deposit/manual",
   requireAuth,
   upload.single("screenshot"),
-  (req, res) => {
+  async (req, res) => {
     const { amount } = req.body;
     if (!amount || Number(amount) <= 0) {
       return res.status(400).json({ error: "A positive amount is required" });
@@ -290,7 +290,7 @@ app.post(
       return res.status(400).json({ error: "A payment screenshot is required" });
     }
 
-    const deposits = db.deposits.all();
+    const deposits = await db.deposits.all();
     const deposit = {
       id: crypto.randomUUID(),
       userId: req.user.id,
@@ -302,20 +302,20 @@ app.post(
     };
 
     deposits.push(deposit);
-    db.deposits.save(deposits);
+    await db.deposits.save(deposits);
     res.status(201).json(deposit);
   }
 );
 
 // Customer: see their own deposit history (both instant and manual)
-app.get("/api/wallet/deposits", requireAuth, (req, res) => {
-  const deposits = db.deposits.all().filter((d) => d.userId === req.user.id);
+app.get("/api/wallet/deposits", requireAuth, async (req, res) => {
+  const deposits = (await db.deposits.all()).filter((d) => d.userId === req.user.id);
   res.json(deposits);
 });
 
 // Admin: see all deposits (filter client-side, or add ?status=pending)
-app.get("/api/admin/deposits", requireAuth, requireAdmin, (req, res) => {
-  let deposits = db.deposits.all();
+app.get("/api/admin/deposits", requireAuth, requireAdmin, async (req, res) => {
+  let deposits = await db.deposits.all();
   if (req.query.status) {
     deposits = deposits.filter((d) => d.status === req.query.status);
   }
@@ -323,8 +323,8 @@ app.get("/api/admin/deposits", requireAuth, requireAdmin, (req, res) => {
 });
 
 // Admin: approve a MANUAL deposit after checking the screenshot -> credits wallet
-app.post("/api/admin/deposits/:id/approve", requireAuth, requireAdmin, (req, res) => {
-  const deposits = db.deposits.all();
+app.post("/api/admin/deposits/:id/approve", requireAuth, requireAdmin, async (req, res) => {
+  const deposits = await db.deposits.all();
   const deposit = deposits.find((d) => d.id === req.params.id);
   if (!deposit) return res.status(404).json({ error: "Deposit not found" });
   if (deposit.status !== "pending") {
@@ -332,19 +332,19 @@ app.post("/api/admin/deposits/:id/approve", requireAuth, requireAdmin, (req, res
   }
 
   deposit.status = "completed";
-  db.deposits.save(deposits);
+  await db.deposits.save(deposits);
 
-  const users = db.users.all();
+  const users = await db.users.all();
   const user = users.find((u) => u.id === deposit.userId);
   user.walletBalance += deposit.amount;
-  db.users.save(users);
+  await db.users.save(users);
 
   res.json({ deposit, newBalance: user.walletBalance });
 });
 
 // Admin: reject a manual deposit (e.g. fake or unclear screenshot)
-app.post("/api/admin/deposits/:id/reject", requireAuth, requireAdmin, (req, res) => {
-  const deposits = db.deposits.all();
+app.post("/api/admin/deposits/:id/reject", requireAuth, requireAdmin, async (req, res) => {
+  const deposits = await db.deposits.all();
   const deposit = deposits.find((d) => d.id === req.params.id);
   if (!deposit) return res.status(404).json({ error: "Deposit not found" });
   if (deposit.status !== "pending") {
@@ -352,7 +352,7 @@ app.post("/api/admin/deposits/:id/reject", requireAuth, requireAdmin, (req, res)
   }
 
   deposit.status = "rejected";
-  db.deposits.save(deposits);
+  await db.deposits.save(deposits);
   res.json({ deposit });
 });
 
@@ -360,16 +360,16 @@ app.post("/api/admin/deposits/:id/reject", requireAuth, requireAdmin, (req, res)
 // PURCHASE — spend wallet balance to buy an item
 // ============================================================
 
-app.post("/api/purchase", requireAuth, (req, res) => {
+app.post("/api/purchase", requireAuth, async (req, res) => {
   const { itemId } = req.body;
   if (!itemId) return res.status(400).json({ error: "itemId is required" });
 
-  const items = db.items.all();
+  const items = await db.items.all();
   const item = items.find((i) => i.id === itemId);
   if (!item) return res.status(404).json({ error: "Item not found" });
   if (item.sold) return res.status(400).json({ error: "Item already sold" });
 
-  const users = db.users.all();
+  const users = await db.users.all();
   const user = users.find((u) => u.id === req.user.id);
   if (user.walletBalance < item.price) {
     return res.status(400).json({ error: "Insufficient wallet balance" });
@@ -380,8 +380,8 @@ app.post("/api/purchase", requireAuth, (req, res) => {
   item.sold = true;
   item.ownerId = user.id;
 
-  db.users.save(users);
-  db.items.save(items);
+  await db.users.save(users);
+  await db.items.save(items);
 
   res.json({
     message: "Purchase successful",
