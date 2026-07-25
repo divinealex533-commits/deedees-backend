@@ -201,7 +201,22 @@ app.get("/api/my-orders", requireAuth, async (req, res) => {
     price: p.price,
     item: items.find((i) => i.id === p.itemId) || null,
   }));
+// Customer: their referral code and how much they've earned so far
+app.get("/api/my-referrals", requireAuth, async (req, res) => {
+  const users = await db.users.all();
+  const user = users.find((u) => u.id === req.user.id);
+  if (!user) return res.status(404).json({ error: "User not found" });
 
+  const referredUsers = users.filter((u) => u.referredBy === user.id);
+  const successfulReferrals = referredUsers.filter((u) => u.referralRewardProcessed).length;
+
+  res.json({
+    referralCode: user.referralCode,
+    totalReferred: referredUsers.length,
+    successfulReferrals,
+    totalEarned: successfulReferrals * 500,
+  });
+});
   res.json({ orders });
 });
 
