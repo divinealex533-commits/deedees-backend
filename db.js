@@ -1,24 +1,50 @@
-import fs from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
+import pg from "pg";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DATA_DIR = path.join(__dirname, "data");
+const { Pool } = pg;
 
-if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR);
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false },
+});
 
-function filePath(name) {
-  return path.join(DATA_DIR, `${name}.json`);
+async function initTables() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id SERIAL PRIMARY KEY,
+      data JSONB NOT NULL
+    );
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS items (
+      id SERIAL PRIMARY KEY,
+      data JSONB NOT NULL
+    );
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS deposits (
+      id SERIAL PRIMARY KEY,
+      data JSONB NOT NULL
+    );
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS purchases (
+      id SERIAL PRIMARY KEY,
+      data JSONB NOT NULL
+    );
+  `);
+}
+initTables().catch((err) => console.error("Failed to init tables:", err));
+
+async function readTable(name) {
+  const res = await pool.query(`SELECT data FROM ${name}`);
+  return res.rows.map((row) => row.data);
 }
 
-function readTable(name) {
-  const p = filePath(name);
-  if (!fs.existsSync(p)) return [];
-  return JSON.parse(fs.readFileSync(p, "utf-8"));
-}
-
-function writeTable(name, data) {
-  fs.writeFileSync(filePath(name), JSON.stringify(data, null, 2));
+async function writeTable(name, rows) {
+  await pool.query(`DELETE FROM ${name}`);
+  for (const row of rows) {
+    await pool.query(`INSERT INTO ${name} (data) VALUES ($1)`, [row]);
+  }
 }
 
 export const db = {
@@ -33,5 +59,9 @@ export const db = {
   deposits: {
     all: () => readTable("deposits"),
     save: (rows) => writeTable("deposits", rows),
+  },
+  purchases: {
+    all: () => readTable("purchases"),
+    save: (rows) => writeTable("purchases", rows),
   },
 };
