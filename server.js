@@ -86,6 +86,13 @@ async function creditDepositByReference(reference, amountNaira) {
   }
 }
 
+// Strips the admin-only accessLink field (ebook link / credentials) so it
+// never reaches shoppers who haven't bought the item.
+function publicItem(item) {
+  const { accessLink, ...safe } = item;
+  return safe;
+}
+
 // ============================================================
 // HEALTH CHECK
 // ============================================================
@@ -151,6 +158,10 @@ function publicUser(user) {
 // DASHBOARD — logged-in user's own info
 // ============================================================
 
+// Returns the user's profile PLUS their purchased items in full,
+// including accessLink (ebook link / credentials) — this is the
+// one place accessLink is allowed to reach the customer, since
+// they've paid for it.
 app.get("/api/me", requireAuth, async (req, res) => {
   const users = await db.users.all();
   const user = users.find((u) => u.id === req.user.id);
@@ -166,24 +177,36 @@ app.get("/api/me", requireAuth, async (req, res) => {
 });
 
 // ============================================================
-// ITEMS — browsing the marketplace
+// ITEMS — browsing the marketplace (public — accessLink stripped)
 // ============================================================
 
 app.get("/api/items", async (req, res) => {
   const items = await db.items.all();
-  res.json(items);
+  res.json(items.map(publicItem));
 });
 
 app.get("/api/items/:id", async (req, res) => {
   const items = await db.items.all();
   const item = items.find((i) => i.id === req.params.id);
   if (!item) return res.status(404).json({ error: "Item not found" });
-  res.json(item);
+  res.json(publicItem(item));
 });
 
-// Admin: add a new item to sell
+// ============================================================
+// ADMIN — item management (full data, including accessLink)
+// ============================================================
+
+// Admin: see every item with full details (including accessLink),
+// so the dashboard can display/edit the ebook link or credentials.
+app.get("/api/admin/items", requireAuth, requireAdmin, async (req, res) => {
+  const items = await db.items.all();
+  res.json(items);
+});
+
+// Admin: add a new item to sell. Accepts an optional accessLink
+// (ebook link / login credentials) that only a buyer will ever see.
 app.post("/api/items", requireAuth, requireAdmin, async (req, res) => {
-  const { name, description, price, image } = req.body;
+  const { name, description, price, image, imageUrl, categoryId, inStock, accessLink } = req.body;
   if (!name || price == null) {
     return res.status(400).json({ error: "name and price are required" });
   }
@@ -194,14 +217,60 @@ app.post("/api/items", requireAuth, requireAdmin, async (req, res) => {
     name,
     description: description || "",
     price,
-    image: image || "",
+    imageUrl: imageUrl || image || "",
+    categoryId: categoryId || null,
+    inStock: inStock !== undefined ? inStock : true,
     sold: false,
+    accessLink: accessLink || "",
     createdAt: new Date().toISOString(),
   };
 
   items.push(newItem);
   await db.items.save(items);
   res.status(201).json(newItem);
+});
+
+// Admin: update an existing item — name, price, category, image,
+// stock status, and/or accessLink (ebook link / credentials).
+app.put("/api/items/:id", requireAuth, requireAdmin, async (req, res) => {
+  const items = await db.items.all();
+  const item = items.find((i) => i.id === req.params.id);
+  if (!item) return res.status(404).json({ error: "Item not found" });
+
+  const { name, description, price, image, imageUrl, categoryId, inStock, accessLink } = req.body;
+  if (name !== undefined) item.name = name;
+  if (description !== undefined) item.description = description;
+  if (price !== undefined) item.price = price;
+  if (imageUrl !== undefined) item.imageUrl = imageUrl;
+  else if (image !== undefined) item.imageUrl = image;
+  if (categoryId !== undefined) item.categoryId = categoryId;
+  if (inStock !== undefined) item.inStock = inStock;
+  if (accessLink !== undefined) item.accessLink = accessLink;
+
+  await db.items.save(items);
+  res.json(item);
+});
+
+// Admin: flip an item's in-stock status on/off
+app.post("/api/items/:id/toggle-stock", requireAuth, requireAdmin, async (req, res) => {
+  const items = await db.items.all();
+  const item = items.find((i) => i.id === req.params.id);
+  if (!item) return res.status(404).json({ error: "Item not found" });
+
+  item.inStock = !item.inStock;
+  await db.items.save(items);
+  res.json(item);
+});
+
+// Admin: delete an item
+app.delete("/api/items/:id", requireAuth, requireAdmin, async (req, res) => {
+  const items = await db.items.all();
+  const item = items.find((i) => i.id === req.params.id);
+  if (!item) return res.status(404).json({ error: "Item not found" });
+
+  const remaining = items.filter((i) => i.id !== req.params.id);
+  await db.items.save(remaining);
+  res.json({ message: "Item deleted" });
 });
 
 // ============================================================
@@ -383,11 +452,40 @@ app.post("/api/purchase", requireAuth, async (req, res) => {
   await db.users.save(users);
   await db.items.save(items);
 
+  const purchases = await db.purchases.all();
+  purchases.push({
+    id: crypto.randomUUID(),
+    itemId: item.id,
+    buyerId: user.id,
+    buyerName: user.name,
+    buyerEmail: user.email,
+    price: item.price,
+    createdAt: new Date().toISOString(),
+  });
+  await db.purchases.save(purchases);
+
   res.json({
     message: "Purchase successful",
-    item,
+    item, // includes accessLink — this is the buyer, so it's OK
     newBalance: user.walletBalance,
   });
+});
+
+// Admin: full sales history (used by the Sales tab in the dashboard)
+app.get("/api/sales", requireAuth, requireAdmin, async (req, res) => {
+  const [purchases, items] = await Promise.all([db.purchases.all(), db.items.all()]);
+  const sales = purchases.map((p) => {
+    const item = items.find((i) => i.id === p.itemId);
+    return {
+      ...(item || {}),
+      id: p.id,
+      price: p.price,
+      buyerName: p.buyerName,
+      buyerEmail: p.buyerEmail,
+      createdAt: p.createdAt,
+    };
+  });
+  res.json(sales);
 });
 
 const PORT = process.env.PORT || 3001;
