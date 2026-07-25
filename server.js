@@ -481,10 +481,21 @@ app.post("/api/purchase", requireAuth, async (req, res) => {
     return res.status(400).json({ error: `Only ${availableQty} left in stock` });
   }
 
-  const totalPrice = item.price * qtyToBuy;
-
   const users = await db.users.all();
   const user = users.find((u) => u.id === req.user.id);
+
+  const purchases = await db.purchases.all();
+  const isFirstPurchase = !purchases.some((p) => p.buyerId === user.id);
+  const eligibleForReferralDiscount =
+    isFirstPurchase && !!user.referredBy && !user.referralRewardProcessed;
+
+  let totalPrice = item.price * qtyToBuy;
+  let discountApplied = 0;
+  if (eligibleForReferralDiscount) {
+    discountApplied = Math.round(totalPrice * 0.05);
+    totalPrice -= discountApplied;
+  }
+
   if (user.walletBalance < totalPrice) {
     return res.status(400).json({ error: "Insufficient wallet balance" });
   }
@@ -502,10 +513,19 @@ app.post("/api/purchase", requireAuth, async (req, res) => {
     item.inStock = false;
   }
 
+  // First-purchase referral reward: 5% off for the new customer,
+  // ₦500 wallet credit for whoever referred them. Only ever fires once.
+  if (eligibleForReferralDiscount) {
+    user.referralRewardProcessed = true;
+    const referrer = users.find((u) => u.id === user.referredBy);
+    if (referrer) {
+      referrer.walletBalance += 500;
+    }
+  }
+
   await db.users.save(users);
   await db.items.save(items);
 
-  const purchases = await db.purchases.all();
   purchases.push({
     id: crypto.randomUUID(),
     itemId: item.id,
@@ -514,6 +534,7 @@ app.post("/api/purchase", requireAuth, async (req, res) => {
     buyerEmail: user.email,
     price: totalPrice,
     quantity: qtyToBuy,
+    referralDiscountApplied: discountApplied || undefined,
     createdAt: new Date().toISOString(),
   });
   await db.purchases.save(purchases);
@@ -522,9 +543,9 @@ app.post("/api/purchase", requireAuth, async (req, res) => {
     message: "Purchase successful",
     item, // includes accessLink — this is the buyer, so it's OK
     newBalance: user.walletBalance,
+    discountApplied,
   });
 });
-
 // Admin: full sales history (used by the Sales tab in the dashboard)
 app.get("/api/admin/sales", requireAuth, requireAdmin, async (req, res) => {
   const [purchases, items] = await Promise.all([db.purchases.all(), db.items.all()]);
