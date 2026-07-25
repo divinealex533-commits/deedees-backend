@@ -471,6 +471,26 @@ app.post("/api/purchase", requireAuth, async (req, res) => {
   });
 });
 
+// Customer: see their own order history — each order includes the full
+// item (accessLink included), since accessLink is only ever safe to
+// show to the person who actually bought that item.
+app.get("/api/my-orders", requireAuth, async (req, res) => {
+  const [purchases, items] = await Promise.all([db.purchases.all(), db.items.all()]);
+
+  const myPurchases = purchases
+    .filter((p) => p.buyerId === req.user.id)
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+  const orders = myPurchases.map((p) => ({
+    id: p.id,
+    purchasedAt: p.createdAt,
+    price: p.price,
+    item: items.find((i) => i.id === p.itemId) || null,
+  }));
+
+  res.json({ orders });
+});
+
 // Admin: full sales history (used by the Sales tab in the dashboard)
 app.get("/api/sales", requireAuth, requireAdmin, async (req, res) => {
   const [purchases, items] = await Promise.all([db.purchases.all(), db.items.all()]);
