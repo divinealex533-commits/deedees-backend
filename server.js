@@ -86,11 +86,14 @@ async function creditDepositByReference(reference, amountNaira) {
   }
 }
 
-// Strips the admin-only accessLink field (ebook link / credentials) so it
-// never reaches shoppers who haven't bought the item.
+// Strips the admin-only accessLinks credential pool so it never reaches
+// shoppers who haven't bought the item. Exposes a safe stockCount instead,
+// and derives `sold` from whether any credentials remain (kept for any
+// older frontend code that still reads item.sold).
 function publicItem(item) {
-  const { accessLink, ...safe } = item;
-  return safe;
+  const { accessLinks, ...safe } = item;
+  const stockCount = Array.isArray(accessLinks) ? accessLinks.length : 0;
+  return { ...safe, stockCount, sold: stockCount === 0 };
 }
 
 // ============================================================
@@ -104,12 +107,8 @@ app.get("/", (req, res) => {
 // AUTH — signup & login
 // ============================================================
 
-function generateReferralCode() {
-  return crypto.randomBytes(4).toString("hex").toUpperCase();
-}
-
 app.post("/api/auth/signup", async (req, res) => {
-  const { name, email, password, referralCode } = req.body;
+  const { name, email, password } = req.body;
   if (!name || !email || !password) {
     return res.status(400).json({ error: "name, email and password are required" });
   }
@@ -117,12 +116,6 @@ app.post("/api/auth/signup", async (req, res) => {
   const users = await db.users.all();
   if (users.find((u) => u.email.toLowerCase() === email.toLowerCase())) {
     return res.status(409).json({ error: "An account with that email already exists" });
-  }
-
-  let referredBy = null;
-  if (referralCode) {
-    const referrer = users.find((u) => u.referralCode === referralCode.toUpperCase());
-    if (referrer) referredBy = referrer.id;
   }
 
   const newUser = {
@@ -133,9 +126,6 @@ app.post("/api/auth/signup", async (req, res) => {
     walletBalance: 0,
     isAdmin: users.length === 0, // first person to sign up becomes admin
     purchasedItemIds: [],
-    referralCode: generateReferralCode(),
-    referredBy,
-    referralRewardProcessed: false,
     createdAt: new Date().toISOString(),
   };
 
@@ -148,7 +138,7 @@ app.post("/api/auth/signup", async (req, res) => {
     user: publicUser(newUser),
   });
 });
-  
+
 app.post("/api/auth/login", async (req, res) => {
   const { email, password } = req.body;
   const users = await db.users.all();
@@ -171,17 +161,19 @@ function publicUser(user) {
 // DASHBOARD — logged-in user's own info
 // ============================================================
 
-// Returns the user's profile PLUS their purchased items in full,
-// including accessLink (ebook link / credentials) — this is the
-// one place accessLink is allowed to reach the customer, since
-// they've paid for it.
+// Returns the user's profile PLUS their purchased items (public shape —
+// no credential pool). Each purchase's SPECIFIC assigned credential lives
+// on the purchase record itself and is returned by /api/my-orders instead,
+// since that's the only place it's safe: one buyer, one credential.
 app.get("/api/me", requireAuth, async (req, res) => {
   const users = await db.users.all();
   const user = users.find((u) => u.id === req.user.id);
   if (!user) return res.status(404).json({ error: "User not found" });
 
   const items = await db.items.all();
-  const purchasedItems = items.filter((i) => user.purchasedItemIds.includes(i.id));
+  const purchasedItems = items
+    .filter((i) => user.purchasedItemIds.includes(i.id))
+    .map(publicItem);
 
   res.json({
     ...publicUser(user),
@@ -189,39 +181,8 @@ app.get("/api/me", requireAuth, async (req, res) => {
   });
 });
 
-// Customer: their own purchase history, including accessLink for
-// each item (ebook link / credentials) since they've paid for it.
-app.get("/api/my-orders", requireAuth, async (req, res) => {
-  const [purchases, items] = await Promise.all([db.purchases.all(), db.items.all()]);
-  const myPurchases = purchases.filter((p) => p.buyerId === req.user.id);
-
-  const orders = myPurchases.map((p) => ({
-    id: p.id,
-    purchasedAt: p.createdAt,
-    price: p.price,
-    item: items.find((i) => i.id === p.itemId) || null,
-  }));
-// Customer: their referral code and how much they've earned so far
-app.get("/api/my-referrals", requireAuth, async (req, res) => {
-  const users = await db.users.all();
-  const user = users.find((u) => u.id === req.user.id);
-  if (!user) return res.status(404).json({ error: "User not found" });
-
-  const referredUsers = users.filter((u) => u.referredBy === user.id);
-  const successfulReferrals = referredUsers.filter((u) => u.referralRewardProcessed).length;
-
-  res.json({
-    referralCode: user.referralCode,
-    totalReferred: referredUsers.length,
-    successfulReferrals,
-    totalEarned: successfulReferrals * 500,
-  });
-});
-  res.json({ orders });
-});
-
 // ============================================================
-// ITEMS — browsing the marketplace (public — accessLink stripped)
+// ITEMS — browsing the marketplace (public — credential pool stripped)
 // ============================================================
 
 app.get("/api/items", async (req, res) => {
@@ -237,26 +198,44 @@ app.get("/api/items/:id", async (req, res) => {
 });
 
 // ============================================================
-// ADMIN — item management (full data, including accessLink)
+// ADMIN — item management (full data, including the credential pool)
 // ============================================================
 
-// Admin: see every item with full details (including accessLink),
-// so the dashboard can display/edit the ebook link or credentials.
+// Admin: see every item with full details, including the raw credential
+// pool, so the dashboard can show/manage remaining stock.
 app.get("/api/admin/items", requireAuth, requireAdmin, async (req, res) => {
   const items = await db.items.all();
   res.json(items);
 });
 
-// Admin: add a new item to sell. Accepts an optional accessLink
-// (ebook link / login credentials) that only a buyer will ever see,
-// and a quantity for how many copies/units are available.
+// Admin: add a new item to sell. Accepts an optional accessLinks array —
+// a pool of credentials (ebook links / login pairs / codes), one of which
+// gets handed to each buyer. Also accepts a single `accessLink` string for
+// convenience, which is wrapped into a one-item pool.
 app.post("/api/items", requireAuth, requireAdmin, async (req, res) => {
-  const { name, description, price, image, imageUrl, categoryId, inStock, accessLink, quantity } = req.body;
+  const {
+    name,
+    description,
+    price,
+    image,
+    imageUrl,
+    categoryId,
+    inStock,
+    accessLinks,
+    accessLink,
+  } = req.body;
+
   if (!name || price == null) {
     return res.status(400).json({ error: "name and price are required" });
   }
 
-  const qty = quantity != null ? Number(quantity) : 1;
+  const providedLinks = Array.isArray(accessLinks)
+    ? accessLinks
+    : accessLink
+    ? [accessLink]
+    : [];
+  const cleanedLinks = providedLinks.map(String).map((s) => s.trim()).filter(Boolean);
+
   const items = await db.items.all();
   const newItem = {
     id: crypto.randomUUID(),
@@ -265,10 +244,8 @@ app.post("/api/items", requireAuth, requireAdmin, async (req, res) => {
     price,
     imageUrl: imageUrl || image || "",
     categoryId: categoryId || null,
-    quantity: qty,
-    inStock: inStock !== undefined ? inStock : qty > 0,
-    sold: false,
-    accessLink: accessLink || "",
+    inStock: inStock !== undefined ? inStock : true,
+    accessLinks: cleanedLinks,
     createdAt: new Date().toISOString(),
   };
 
@@ -277,32 +254,59 @@ app.post("/api/items", requireAuth, requireAdmin, async (req, res) => {
   res.status(201).json(newItem);
 });
 
-// Admin: update an existing item — name, price, category, image,
-// stock quantity, and/or accessLink (ebook link / credentials).
+// Admin: update an existing item — name, price, category, image, stock
+// toggle. If `accessLinks` is included here, it REPLACES the whole pool —
+// use POST /api/items/:id/access-links instead to top up without wiping
+// existing unused credentials.
 app.put("/api/items/:id", requireAuth, requireAdmin, async (req, res) => {
   const items = await db.items.all();
   const item = items.find((i) => i.id === req.params.id);
   if (!item) return res.status(404).json({ error: "Item not found" });
 
-  const { name, description, price, image, imageUrl, categoryId, inStock, accessLink, quantity } = req.body;
+  const { name, description, price, image, imageUrl, categoryId, inStock, accessLinks } = req.body;
   if (name !== undefined) item.name = name;
   if (description !== undefined) item.description = description;
   if (price !== undefined) item.price = price;
   if (imageUrl !== undefined) item.imageUrl = imageUrl;
   else if (image !== undefined) item.imageUrl = image;
   if (categoryId !== undefined) item.categoryId = categoryId;
-  if (accessLink !== undefined) item.accessLink = accessLink;
-  if (quantity !== undefined) {
-    item.quantity = Number(quantity);
-    item.inStock = item.quantity > 0;
-  }
   if (inStock !== undefined) item.inStock = inStock;
+  if (accessLinks !== undefined) {
+    item.accessLinks = Array.isArray(accessLinks)
+      ? accessLinks.map(String).map((s) => s.trim()).filter(Boolean)
+      : item.accessLinks;
+  }
 
   await db.items.save(items);
   res.json(item);
 });
 
-// Admin: flip an item's in-stock status on/off
+// Admin: top up stock — append new credentials to an item's pool WITHOUT
+// touching any credentials already assigned to past buyers or already
+// waiting unused in the pool.
+app.post("/api/items/:id/access-links", requireAuth, requireAdmin, async (req, res) => {
+  const { accessLinks } = req.body;
+  const cleaned = Array.isArray(accessLinks)
+    ? accessLinks.map(String).map((s) => s.trim()).filter(Boolean)
+    : [];
+
+  if (cleaned.length === 0) {
+    return res.status(400).json({ error: "accessLinks must be a non-empty array of strings" });
+  }
+
+  const items = await db.items.all();
+  const item = items.find((i) => i.id === req.params.id);
+  if (!item) return res.status(404).json({ error: "Item not found" });
+
+  if (!Array.isArray(item.accessLinks)) item.accessLinks = [];
+  item.accessLinks.push(...cleaned);
+  await db.items.save(items);
+
+  res.json({ message: `Added ${cleaned.length} credential(s)`, stockCount: item.accessLinks.length });
+});
+
+// Admin: flip an item's in-stock status on/off (manual override — separate
+// from whether the credential pool has anything left)
 app.post("/api/items/:id/toggle-stock", requireAuth, requireAdmin, async (req, res) => {
   const items = await db.items.all();
   const item = items.find((i) => i.id === req.params.id);
@@ -477,97 +481,92 @@ app.post("/api/admin/deposits/:id/reject", requireAuth, requireAdmin, async (req
 });
 
 // ============================================================
-// PURCHASE — spend wallet balance to buy an item (supports quantity)
+// PURCHASE — spend wallet balance to buy an item
 // ============================================================
 
+// Every purchase pulls ONE unused credential off the item's pool and
+// permanently assigns it to this purchase record — it's removed from the
+// pool immediately so the next buyer of the same item gets a different one.
 app.post("/api/purchase", requireAuth, async (req, res) => {
-  const { itemId, quantity } = req.body;
+  const { itemId } = req.body;
   if (!itemId) return res.status(400).json({ error: "itemId is required" });
-
-  const qtyToBuy = quantity != null ? Number(quantity) : 1;
-  if (qtyToBuy < 1) return res.status(400).json({ error: "Quantity must be at least 1" });
 
   const items = await db.items.all();
   const item = items.find((i) => i.id === itemId);
   if (!item) return res.status(404).json({ error: "Item not found" });
 
-  const availableQty = item.quantity != null ? item.quantity : (item.sold ? 0 : 1);
-  if (availableQty < qtyToBuy) {
-    return res.status(400).json({ error: `Only ${availableQty} left in stock` });
+  if (!item.inStock) {
+    return res.status(400).json({ error: "Item is not available" });
+  }
+  if (!Array.isArray(item.accessLinks) || item.accessLinks.length === 0) {
+    return res.status(400).json({ error: "This item is currently out of stock" });
   }
 
   const users = await db.users.all();
   const user = users.find((u) => u.id === req.user.id);
-
-  const purchases = await db.purchases.all();
-  const isFirstPurchase = !purchases.some((p) => p.buyerId === user.id);
-  const eligibleForReferralDiscount =
-    isFirstPurchase && !!user.referredBy && !user.referralRewardProcessed;
-
-  let totalPrice = item.price * qtyToBuy;
-  let discountApplied = 0;
-  if (eligibleForReferralDiscount) {
-    discountApplied = Math.round(totalPrice * 0.05);
-    totalPrice -= discountApplied;
-  }
-
-  if (user.walletBalance < totalPrice) {
+  if (user.walletBalance < item.price) {
     return res.status(400).json({ error: "Insufficient wallet balance" });
   }
 
-  user.walletBalance -= totalPrice;
-  if (!user.purchasedItemIds.includes(item.id)) {
-    user.purchasedItemIds.push(item.id);
-  }
+  // Assign the next unused credential to this buyer and remove it from the pool
+  const assignedLink = item.accessLinks.shift();
 
-  if (item.quantity != null) {
-    item.quantity -= qtyToBuy;
-    item.inStock = item.quantity > 0;
-  } else {
-    item.sold = true;
-    item.inStock = false;
-  }
-
-  // First-purchase referral reward: 5% off for the new customer,
-  // ₦500 wallet credit for whoever referred them. Only ever fires once.
-  if (eligibleForReferralDiscount) {
-    user.referralRewardProcessed = true;
-    const referrer = users.find((u) => u.id === user.referredBy);
-    if (referrer) {
-      referrer.walletBalance += 500;
-    }
-  }
+  user.walletBalance -= item.price;
+  user.purchasedItemIds.push(item.id);
 
   await db.users.save(users);
   await db.items.save(items);
 
+  const purchases = await db.purchases.all();
   purchases.push({
     id: crypto.randomUUID(),
     itemId: item.id,
     buyerId: user.id,
     buyerName: user.name,
     buyerEmail: user.email,
-    price: totalPrice,
-    quantity: qtyToBuy,
-    referralDiscountApplied: discountApplied || undefined,
+    price: item.price,
+    accessLink: assignedLink, // this buyer's own credential, never reused
     createdAt: new Date().toISOString(),
   });
   await db.purchases.save(purchases);
 
   res.json({
     message: "Purchase successful",
-    item, // includes accessLink — this is the buyer, so it's OK
+    item: { ...publicItem(item), accessLink: assignedLink }, // safe: only this buyer's own credential
     newBalance: user.walletBalance,
-    discountApplied,
   });
 });
+
+// Customer: see their own order history — each order carries the specific
+// credential THEY were assigned at purchase time (never the shared pool).
+app.get("/api/my-orders", requireAuth, async (req, res) => {
+  const [purchases, items] = await Promise.all([db.purchases.all(), db.items.all()]);
+
+  const myPurchases = purchases
+    .filter((p) => p.buyerId === req.user.id)
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+  const orders = myPurchases.map((p) => {
+    const item = items.find((i) => i.id === p.itemId);
+    return {
+      id: p.id,
+      purchasedAt: p.createdAt,
+      price: p.price,
+      accessLink: p.accessLink || null,
+      item: item ? publicItem(item) : null,
+    };
+  });
+
+  res.json({ orders });
+});
+
 // Admin: full sales history (used by the Sales tab in the dashboard)
-app.get("/api/admin/sales", requireAuth, requireAdmin, async (req, res) => {
+app.get("/api/sales", requireAuth, requireAdmin, async (req, res) => {
   const [purchases, items] = await Promise.all([db.purchases.all(), db.items.all()]);
   const sales = purchases.map((p) => {
     const item = items.find((i) => i.id === p.itemId);
     return {
-      ...(item || {}),
+      ...(item ? publicItem(item) : {}),
       id: p.id,
       price: p.price,
       buyerName: p.buyerName,
