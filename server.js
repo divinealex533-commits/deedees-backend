@@ -86,11 +86,26 @@ async function creditDepositByReference(reference, amountNaira) {
   }
 }
 
-// Strips the admin-only accessLink field (ebook link / credentials) so it
-// never reaches shoppers who haven't bought the item.
+// Returns how many unassigned units an item has. Items with an
+// accessLinks pool are counted by remaining pool size; older items
+// without a pool fall back to a plain quantity or single sold flag.
+function stockCountOf(item) {
+  if (Array.isArray(item.accessLinks)) return item.accessLinks.length;
+  if (item.quantity != null) return item.quantity;
+  return item.sold ? 0 : 1;
+}
+
+// Strips the admin-only accessLinks pool (ebook links / credentials) so it
+// never reaches shoppers who haven't bought the item, and replaces it with
+// a plain stockCount + effective inStock flag for display.
 function publicItem(item) {
-  const { accessLink, ...safe } = item;
-  return safe;
+  const { accessLinks, accessLink, ...safe } = item;
+  const stockCount = stockCountOf(item);
+  return {
+    ...safe,
+    stockCount,
+    inStock: item.inStock !== false && stockCount > 0,
+  };
 }
 
 function generateReferralCode() {
@@ -172,16 +187,23 @@ function publicUser(user) {
 // ============================================================
 
 // Returns the user's profile PLUS their purchased items in full,
-// including accessLink (ebook link / credentials) — this is the
-// one place accessLink is allowed to reach the customer, since
-// they've paid for it.
+// including the specific credential(s) assigned to each purchase —
+// this is the one place that info is allowed to reach the customer,
+// since they've paid for it.
 app.get("/api/me", requireAuth, async (req, res) => {
   const users = await db.users.all();
   const user = users.find((u) => u.id === req.user.id);
   if (!user) return res.status(404).json({ error: "User not found" });
 
-  const items = await db.items.all();
-  const purchasedItems = items.filter((i) => user.purchasedItemIds.includes(i.id));
+  const [items, purchases] = await Promise.all([db.items.all(), db.purchases.all()]);
+  const myPurchases = purchases.filter((p) => p.buyerId === user.id);
+  const purchasedItems = items
+    .filter((i) => user.purchasedItemIds.includes(i.id))
+    .map((i) => {
+      const relatedPurchases = myPurchases.filter((p) => p.itemId === i.id);
+      const assignedCredentials = relatedPurchases.flatMap((p) => p.assignedCredentials || []);
+      return { ...publicItem(i), assignedCredentials };
+    });
 
   res.json({
     ...publicUser(user),
@@ -189,18 +211,22 @@ app.get("/api/me", requireAuth, async (req, res) => {
   });
 });
 
-// Customer: their own purchase history, including accessLink for
-// each item (ebook link / credentials) since they've paid for it.
+// Customer: their own purchase history, including the specific
+// credential(s) assigned to each order since they've paid for it.
 app.get("/api/my-orders", requireAuth, async (req, res) => {
   const [purchases, items] = await Promise.all([db.purchases.all(), db.items.all()]);
   const myPurchases = purchases.filter((p) => p.buyerId === req.user.id);
 
-  const orders = myPurchases.map((p) => ({
-    id: p.id,
-    purchasedAt: p.createdAt,
-    price: p.price,
-    item: items.find((i) => i.id === p.itemId) || null,
-  }));
+  const orders = myPurchases.map((p) => {
+    const item = items.find((i) => i.id === p.itemId);
+    return {
+      id: p.id,
+      purchasedAt: p.createdAt,
+      price: p.price,
+      assignedCredentials: p.assignedCredentials || [],
+      item: item ? publicItem(item) : null,
+    };
+  });
 
   res.json({ orders });
 });
@@ -223,7 +249,7 @@ app.get("/api/my-referrals", requireAuth, async (req, res) => {
 });
 
 // ============================================================
-// ITEMS — browsing the marketplace (public — accessLink stripped)
+// ITEMS — browsing the marketplace (public — credentials stripped)
 // ============================================================
 
 app.get("/api/items", async (req, res) => {
@@ -239,26 +265,26 @@ app.get("/api/items/:id", async (req, res) => {
 });
 
 // ============================================================
-// ADMIN — item management (full data, including accessLink)
+// ADMIN — item management (full data, including the credential pool)
 // ============================================================
 
-// Admin: see every item with full details (including accessLink),
-// so the dashboard can display/edit the ebook link or credentials.
+// Admin: see every item with full details (including the raw
+// accessLinks pool), so the dashboard can show exactly how many
+// credentials are left and let the admin edit/top up stock.
 app.get("/api/admin/items", requireAuth, requireAdmin, async (req, res) => {
   const items = await db.items.all();
   res.json(items);
 });
 
-// Admin: add a new item to sell. Accepts an optional accessLink
-// (ebook link / login credentials) that only a buyer will ever see,
-// and a quantity for how many copies/units are available.
+// Admin: add a new item to sell. Accepts an optional accessLinks array —
+// one credential per unit of stock. Each buyer is assigned a different
+// line from this pool, removed once assigned.
 app.post("/api/items", requireAuth, requireAdmin, async (req, res) => {
-  const { name, description, price, image, imageUrl, categoryId, inStock, accessLink, quantity } = req.body;
+  const { name, description, price, image, imageUrl, categoryId, inStock, accessLinks } = req.body;
   if (!name || price == null) {
     return res.status(400).json({ error: "name and price are required" });
   }
 
-  const qty = quantity != null ? Number(quantity) : 1;
   const items = await db.items.all();
   const newItem = {
     id: crypto.randomUUID(),
@@ -267,10 +293,8 @@ app.post("/api/items", requireAuth, requireAdmin, async (req, res) => {
     price,
     imageUrl: imageUrl || image || "",
     categoryId: categoryId || null,
-    quantity: qty,
-    inStock: inStock !== undefined ? inStock : qty > 0,
-    sold: false,
-    accessLink: accessLink || "",
+    accessLinks: Array.isArray(accessLinks) ? accessLinks.filter(Boolean) : [],
+    inStock: inStock !== undefined ? inStock : true,
     createdAt: new Date().toISOString(),
   };
 
@@ -279,32 +303,53 @@ app.post("/api/items", requireAuth, requireAdmin, async (req, res) => {
   res.status(201).json(newItem);
 });
 
-// Admin: update an existing item — name, price, category, image,
-// stock quantity, and/or accessLink (ebook link / credentials).
+// Admin: update an existing item's basic details (name, price,
+// category, image, description, or the manual in-stock override).
+// This intentionally never touches the accessLinks pool — use
+// "Add Stock" below for that, so past buyers' assigned credentials
+// (and anything already waiting in the pool) are never disturbed.
 app.put("/api/items/:id", requireAuth, requireAdmin, async (req, res) => {
   const items = await db.items.all();
   const item = items.find((i) => i.id === req.params.id);
   if (!item) return res.status(404).json({ error: "Item not found" });
 
-  const { name, description, price, image, imageUrl, categoryId, inStock, accessLink, quantity } = req.body;
+  const { name, description, price, image, imageUrl, categoryId, inStock } = req.body;
   if (name !== undefined) item.name = name;
   if (description !== undefined) item.description = description;
   if (price !== undefined) item.price = price;
   if (imageUrl !== undefined) item.imageUrl = imageUrl;
   else if (image !== undefined) item.imageUrl = image;
   if (categoryId !== undefined) item.categoryId = categoryId;
-  if (accessLink !== undefined) item.accessLink = accessLink;
-  if (quantity !== undefined) {
-    item.quantity = Number(quantity);
-    item.inStock = item.quantity > 0;
-  }
   if (inStock !== undefined) item.inStock = inStock;
 
   await db.items.save(items);
   res.json(item);
 });
 
-// Admin: flip an item's in-stock status on/off
+// Admin: top up stock by adding more credentials to the pool.
+// Existing pool entries and already-assigned credentials are untouched.
+app.post("/api/items/:id/add-access-links", requireAuth, requireAdmin, async (req, res) => {
+  const { credentials } = req.body;
+  if (!Array.isArray(credentials) || credentials.filter(Boolean).length === 0) {
+    return res.status(400).json({ error: "At least one credential is required" });
+  }
+
+  const items = await db.items.all();
+  const item = items.find((i) => i.id === req.params.id);
+  if (!item) return res.status(404).json({ error: "Item not found" });
+
+  if (!Array.isArray(item.accessLinks)) item.accessLinks = [];
+  const cleaned = credentials.map((c) => c.trim()).filter(Boolean);
+  item.accessLinks.push(...cleaned);
+
+  await db.items.save(items);
+  res.json({
+    message: `Added ${cleaned.length} credential(s)`,
+    stockCount: item.accessLinks.length,
+  });
+});
+
+// Admin: flip an item's manual in-stock override on/off
 app.post("/api/items/:id/toggle-stock", requireAuth, requireAdmin, async (req, res) => {
   const items = await db.items.all();
   const item = items.find((i) => i.id === req.params.id);
@@ -479,8 +524,9 @@ app.post("/api/admin/deposits/:id/reject", requireAuth, requireAdmin, async (req
 });
 
 // ============================================================
-// PURCHASE — spend wallet balance to buy an item (supports quantity
-// and a first-purchase referral discount)
+// PURCHASE — spend wallet balance to buy qty units of an item,
+// assigning each buyer their own credential(s) from the pool.
+// Also applies a first-purchase referral discount when eligible.
 // ============================================================
 
 app.post("/api/purchase", requireAuth, async (req, res) => {
@@ -494,7 +540,7 @@ app.post("/api/purchase", requireAuth, async (req, res) => {
   const item = items.find((i) => i.id === itemId);
   if (!item) return res.status(404).json({ error: "Item not found" });
 
-  const availableQty = item.quantity != null ? item.quantity : (item.sold ? 0 : 1);
+  const availableQty = stockCountOf(item);
   if (availableQty < qtyToBuy) {
     return res.status(400).json({ error: `Only ${availableQty} left in stock` });
   }
@@ -523,12 +569,16 @@ app.post("/api/purchase", requireAuth, async (req, res) => {
     user.purchasedItemIds.push(item.id);
   }
 
-  if (item.quantity != null) {
+  // Assign this buyer their own credential(s) from the pool, if this
+  // item tracks one. Older items without a pool just get marked as
+  // reduced stock the old way (nothing to assign).
+  let assignedCredentials = [];
+  if (Array.isArray(item.accessLinks)) {
+    assignedCredentials = item.accessLinks.splice(0, qtyToBuy);
+  } else if (item.quantity != null) {
     item.quantity -= qtyToBuy;
-    item.inStock = item.quantity > 0;
   } else {
     item.sold = true;
-    item.inStock = false;
   }
 
   // First-purchase referral reward: 5% off for the new customer,
@@ -552,6 +602,7 @@ app.post("/api/purchase", requireAuth, async (req, res) => {
     buyerEmail: user.email,
     price: totalPrice,
     quantity: qtyToBuy,
+    assignedCredentials,
     referralDiscountApplied: discountApplied || undefined,
     createdAt: new Date().toISOString(),
   });
@@ -559,7 +610,7 @@ app.post("/api/purchase", requireAuth, async (req, res) => {
 
   res.json({
     message: "Purchase successful",
-    item, // includes accessLink — this is the buyer, so it's OK
+    item: { ...publicItem(item), assignedCredentials }, // buyer-specific, OK to include
     newBalance: user.walletBalance,
     discountApplied,
   });
@@ -571,7 +622,7 @@ app.get("/api/admin/sales", requireAuth, requireAdmin, async (req, res) => {
   const sales = purchases.map((p) => {
     const item = items.find((i) => i.id === p.itemId);
     return {
-      ...(item || {}),
+      ...(item ? publicItem(item) : {}),
       id: p.id,
       price: p.price,
       buyerName: p.buyerName,
