@@ -1,11 +1,10 @@
 import express from "express";
 import cors from "cors";
 import crypto from "crypto";
+import path from "path";
 import dotenv from "dotenv";
 import multer from "multer";
-import path from "path";
-import fs from "fs";
-import { fileURLToPath } from "url";
+import { createClient } from "@supabase/supabase-js";
 import { db } from "./db.js";
 import {
   hashPassword,
@@ -18,9 +17,13 @@ import { initializeTransaction, verifyTransaction } from "./paystack.js";
 
 dotenv.config();
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const UPLOADS_DIR = path.join(__dirname, "uploads");
-if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR);
+// Payment screenshots are uploaded here instead of local disk, since
+// Render's filesystem is wiped on every redeploy — Supabase Storage keeps
+// them permanently. The project URL isn't sensitive; only the service
+// role key (read from the environment) is.
+const SUPABASE_URL = "https://rujxebbeufilpqlszzwz.supabase.co";
+const SUPABASE_BUCKET = "payment-screenshots";
+const supabase = createClient(SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
 const app = express();
 app.use(cors());
@@ -53,19 +56,33 @@ app.post(
 
 app.use(express.json());
 
-// Serve uploaded payment screenshots so admin can view them
-app.use("/uploads", express.static(UPLOADS_DIR));
-
+// Files are uploaded in memory, then pushed to Supabase Storage — nothing
+// is ever written to local disk, so nothing is lost on redeploy.
 const upload = multer({
-  storage: multer.diskStorage({
-    destination: UPLOADS_DIR,
-    filename: (req, file, cb) => {
-      const ext = path.extname(file.originalname);
-      cb(null, `${crypto.randomUUID()}${ext}`);
-    },
-  }),
+  storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
 });
+
+// Uploads a payment screenshot to Supabase Storage and returns its public
+// URL. Throws if the upload fails.
+async function uploadScreenshot(file) {
+  const ext = path.extname(file.originalname) || ".jpg";
+  const filename = `${crypto.randomUUID()}${ext}`;
+
+  const { error: uploadError } = await supabase.storage
+    .from(SUPABASE_BUCKET)
+    .upload(filename, file.buffer, {
+      contentType: file.mimetype,
+      upsert: false,
+    });
+
+  if (uploadError) {
+    throw new Error(`Screenshot upload failed: ${uploadError.message}`);
+  }
+
+  const { data } = supabase.storage.from(SUPABASE_BUCKET).getPublicUrl(filename);
+  return data.publicUrl;
+}
 
 // Credits a wallet exactly once for a given deposit reference.
 // Used by both the webhook and the verify endpoint so a payment
@@ -475,7 +492,9 @@ app.get("/api/wallet/deposit/instant/verify/:reference", requireAuth, async (req
 // ---- Path B: manual payment with screenshot ----
 
 // Customer: submit proof of payment (a screenshot) for admin to review.
-// Sent as multipart/form-data with fields: amount, and a file field "screenshot".
+// Sent as multipart/form-data with fields: amount, and a file field
+// "screenshot". The file is uploaded straight to Supabase Storage —
+// never written to local disk — so it survives every redeploy.
 app.post(
   "/api/wallet/deposit/manual",
   requireAuth,
@@ -489,6 +508,14 @@ app.post(
       return res.status(400).json({ error: "A payment screenshot is required" });
     }
 
+    let screenshotUrl;
+    try {
+      screenshotUrl = await uploadScreenshot(req.file);
+    } catch (err) {
+      console.error(err);
+      return res.status(502).json({ error: "Could not upload screenshot. Please try again." });
+    }
+
     const deposits = await db.deposits.all();
     const deposit = {
       id: crypto.randomUUID(),
@@ -496,7 +523,7 @@ app.post(
       amount: Number(amount),
       method: "manual",
       status: "pending", // admin must approve or reject
-      screenshotUrl: `/uploads/${req.file.filename}`,
+      screenshotUrl,
       createdAt: new Date().toISOString(),
     };
 
