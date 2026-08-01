@@ -421,6 +421,83 @@ app.delete("/api/items/:id", requireAuth, requireAdmin, async (req, res) => {
 });
 
 // ============================================================
+// CATEGORIES — shared across every visitor (stored in the database,
+// not per-device) so a new category or product shows up for everyone,
+// not just the admin who added it.
+// ============================================================
+
+const DEFAULT_CATEGORIES = [
+  { name: "Social Media Growth", description: "Followers, likes, views and engagement boosts", icon: "Shield" },
+  { name: "Buy Account", description: "Verified, ready-to-use social media accounts", icon: "Shield" },
+  { name: "Other", description: "Everything else", icon: "Shield" },
+];
+
+// Public: anyone browsing the store needs this to render category filters
+app.get("/api/categories", async (req, res) => {
+  let categories = await db.categories.all();
+
+  // First-run seed: if nobody's ever added a category, start with sensible
+  // defaults instead of an empty filter bar.
+  if (categories.length === 0) {
+    categories = DEFAULT_CATEGORIES.map((c) => ({
+      id: crypto.randomUUID(),
+      ...c,
+      createdAt: new Date().toISOString(),
+    }));
+    await db.categories.save(categories);
+  }
+
+  res.json(categories);
+});
+
+// Admin: add a new category
+app.post("/api/categories", requireAuth, requireAdmin, async (req, res) => {
+  const { name, description, icon } = req.body;
+  if (!name || !name.trim()) {
+    return res.status(400).json({ error: "name is required" });
+  }
+
+  const categories = await db.categories.all();
+  const newCategory = {
+    id: crypto.randomUUID(),
+    name: name.trim(),
+    description: description || "",
+    icon: icon || "Shield",
+    createdAt: new Date().toISOString(),
+  };
+
+  categories.push(newCategory);
+  await db.categories.save(categories);
+  res.status(201).json(newCategory);
+});
+
+// Admin: update a category
+app.put("/api/categories/:id", requireAuth, requireAdmin, async (req, res) => {
+  const categories = await db.categories.all();
+  const category = categories.find((c) => c.id === req.params.id);
+  if (!category) return res.status(404).json({ error: "Category not found" });
+
+  const { name, description, icon } = req.body;
+  if (name !== undefined) category.name = name;
+  if (description !== undefined) category.description = description;
+  if (icon !== undefined) category.icon = icon;
+
+  await db.categories.save(categories);
+  res.json(category);
+});
+
+// Admin: delete a category
+app.delete("/api/categories/:id", requireAuth, requireAdmin, async (req, res) => {
+  const categories = await db.categories.all();
+  const category = categories.find((c) => c.id === req.params.id);
+  if (!category) return res.status(404).json({ error: "Category not found" });
+
+  const remaining = categories.filter((c) => c.id !== req.params.id);
+  await db.categories.save(remaining);
+  res.json({ message: "Category deleted" });
+});
+
+// ============================================================
 // WALLET — deposits
 //   Path A: instant, automatic via Paystack
 //   Path B: manual, customer uploads a payment screenshot for review
