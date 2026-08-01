@@ -1,5 +1,4 @@
 import pg from "pg";
-
 const { Pool } = pg;
 
 const pool = new Pool({
@@ -32,7 +31,14 @@ async function initTables() {
       data JSONB NOT NULL
     );
   `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS categories (
+      id SERIAL PRIMARY KEY,
+      data JSONB NOT NULL
+    );
+  `);
 }
+
 initTables().catch((err) => console.error("Failed to init tables:", err));
 
 async function readTable(name) {
@@ -63,5 +69,9 @@ export const db = {
   purchases: {
     all: () => readTable("purchases"),
     save: (rows) => writeTable("purchases", rows),
+  },
+  categories: {
+    all: () => readTable("categories"),
+    save: (rows) => writeTable("categories", rows),
   },
 };
