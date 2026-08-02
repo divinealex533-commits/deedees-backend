@@ -774,6 +774,84 @@ app.get("/api/admin/sales", requireAuth, requireAdmin, async (req, res) => {
   res.json(sales);
 });
 
+// ============================================================
+// SUPPORT TICKETS — customers ask for help; admin views and replies.
+// Anyone can open a ticket (no login required, so it works the same way
+// as your WhatsApp/Telegram buttons for a visitor who hasn't signed up
+// yet) — logged-in customers just have their name/email prefilled by the
+// frontend. Replies are stored as a list so a ticket can go back and
+// forth if needed.
+// ============================================================
+
+// Public: submit a new support ticket
+app.post("/api/support/tickets", async (req, res) => {
+  const { name, email, subject, message } = req.body;
+  if (!name || !email || !subject || !message) {
+    return res.status(400).json({ error: "name, email, subject and message are required" });
+  }
+
+  const tickets = await db.tickets.all();
+  const newTicket = {
+    id: crypto.randomUUID(),
+    name,
+    email,
+    subject,
+    message,
+    status: "open", // open | resolved
+    replies: [],
+    createdAt: new Date().toISOString(),
+  };
+
+  tickets.push(newTicket);
+  await db.tickets.save(tickets);
+  res.status(201).json(newTicket);
+});
+
+// Admin: view every support ticket, newest first
+app.get("/api/admin/support/tickets", requireAuth, requireAdmin, async (req, res) => {
+  const tickets = await db.tickets.all();
+  tickets.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  res.json(tickets);
+});
+
+// Admin: reply to a ticket (also flips status back to "open" if it had
+// been marked resolved, since the conversation is continuing)
+app.post("/api/admin/support/tickets/:id/reply", requireAuth, requireAdmin, async (req, res) => {
+  const { message } = req.body;
+  if (!message || !message.trim()) {
+    return res.status(400).json({ error: "message is required" });
+  }
+
+  const tickets = await db.tickets.all();
+  const ticket = tickets.find((t) => t.id === req.params.id);
+  if (!ticket) return res.status(404).json({ error: "Ticket not found" });
+
+  if (!Array.isArray(ticket.replies)) ticket.replies = [];
+  ticket.replies.push({
+    message: message.trim(),
+    createdAt: new Date().toISOString(),
+  });
+
+  await db.tickets.save(tickets);
+  res.json(ticket);
+});
+
+// Admin: mark a ticket resolved or reopen it
+app.post("/api/admin/support/tickets/:id/status", requireAuth, requireAdmin, async (req, res) => {
+  const { status } = req.body;
+  if (!["open", "resolved"].includes(status)) {
+    return res.status(400).json({ error: 'status must be "open" or "resolved"' });
+  }
+
+  const tickets = await db.tickets.all();
+  const ticket = tickets.find((t) => t.id === req.params.id);
+  if (!ticket) return res.status(404).json({ error: "Ticket not found" });
+
+  ticket.status = status;
+  await db.tickets.save(tickets);
+  res.json(ticket);
+});
+
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
