@@ -1,11 +1,9 @@
 import pg from "pg";
 const { Pool } = pg;
-
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false },
 });
-
 async function initTables() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS users (
@@ -37,22 +35,24 @@ async function initTables() {
       data JSONB NOT NULL
     );
   `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS tickets (
+      id SERIAL PRIMARY KEY,
+      data JSONB NOT NULL
+    );
+  `);
 }
-
 initTables().catch((err) => console.error("Failed to init tables:", err));
-
 async function readTable(name) {
   const res = await pool.query(`SELECT data FROM ${name}`);
   return res.rows.map((row) => row.data);
 }
-
 async function writeTable(name, rows) {
   await pool.query(`DELETE FROM ${name}`);
   for (const row of rows) {
     await pool.query(`INSERT INTO ${name} (data) VALUES ($1)`, [row]);
   }
 }
-
 export const db = {
   users: {
     all: () => readTable("users"),
@@ -73,5 +73,9 @@ export const db = {
   categories: {
     all: () => readTable("categories"),
     save: (rows) => writeTable("categories", rows),
+  },
+  tickets: {
+    all: () => readTable("tickets"),
+    save: (rows) => writeTable("tickets", rows),
   },
 };
