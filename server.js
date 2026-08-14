@@ -51,7 +51,6 @@ const supabase = createClient(
 
 // ============================================================
 // PAYSTACK WEBHOOK
-// IMPORTANT: must come before express.json()
 // ============================================================
 
 app.post(
@@ -71,14 +70,10 @@ app.post(
         .digest("hex");
 
       if (signature !== expected) {
-        return res
-          .status(401)
-          .send("Invalid signature");
+        return res.status(401).send("Invalid signature");
       }
 
-      const event = JSON.parse(
-        req.body.toString()
-      );
+      const event = JSON.parse(req.body.toString());
 
       if (event.event === "charge.success") {
         await creditDepositByReference(
@@ -89,11 +84,7 @@ app.post(
 
       res.sendStatus(200);
     } catch (err) {
-      console.error(
-        "Paystack webhook error:",
-        err
-      );
-
+      console.error("Paystack webhook error:", err);
       res.sendStatus(500);
     }
   }
@@ -116,20 +107,15 @@ async function uploadScreenshot(file) {
   const ext =
     path.extname(file.originalname) || ".jpg";
 
-  const filename =
-    `${crypto.randomUUID()}${ext}`;
+  const filename = `${crypto.randomUUID()}${ext}`;
 
   const { error: uploadError } =
     await supabase.storage
       .from(SUPABASE_BUCKET)
-      .upload(
-        filename,
-        file.buffer,
-        {
-          contentType: file.mimetype,
-          upsert: false,
-        }
-      );
+      .upload(filename, file.buffer, {
+        contentType: file.mimetype,
+        upsert: false,
+      });
 
   if (uploadError) {
     throw new Error(
@@ -153,14 +139,11 @@ async function creditDepositByReference(
   reference,
   amountNaira
 ) {
-  const deposits =
-    await db.deposits.all();
+  const deposits = await db.deposits.all();
 
-  const deposit =
-    deposits.find(
-      (d) =>
-        d.reference === reference
-    );
+  const deposit = deposits.find(
+    (d) => d.reference === reference
+  );
 
   if (
     !deposit ||
@@ -171,23 +154,20 @@ async function creditDepositByReference(
 
   deposit.status = "completed";
 
-  await db.deposits.save(
-    deposits
+  await db.deposits.save(deposits);
+
+  const users = await db.users.all();
+
+  const user = users.find(
+    (u) => u.id === deposit.userId
   );
-
-  const users =
-    await db.users.all();
-
-  const user =
-    users.find(
-      (u) =>
-        u.id === deposit.userId
-    );
 
   if (user) {
     user.walletBalance =
       Number(user.walletBalance || 0) +
-      Number(amountNaira || deposit.amount || 0);
+      Number(
+        amountNaira || deposit.amount || 0
+      );
 
     await db.users.save(users);
   }
@@ -206,10 +186,7 @@ function stockCountOf(item) {
   }
 
   if (item.quantity != null) {
-    return Math.max(
-      0,
-      Number(item.quantity)
-    );
+    return Math.max(0, Number(item.quantity));
   }
 
   return item.sold ? 0 : 1;
@@ -222,8 +199,7 @@ function publicItem(item) {
     ...safe
   } = item;
 
-  const stockCount =
-    stockCountOf(item);
+  const stockCount = stockCountOf(item);
 
   return {
     ...safe,
@@ -243,6 +219,34 @@ function generateReferralCode() {
     .randomBytes(4)
     .toString("hex")
     .toUpperCase();
+}
+
+// ============================================================
+// ADMIN EMAIL SYNC
+// IMPORTANT:
+// This makes an EXISTING account admin when its email
+// matches ADMIN_EMAIL in Render environment variables.
+// ============================================================
+
+function syncAdminStatus(user) {
+  const adminEmail = (
+    process.env.ADMIN_EMAIL || ""
+  )
+    .trim()
+    .toLowerCase();
+
+  if (!adminEmail) {
+    return false;
+  }
+
+  const isAdmin =
+    String(user.email || "")
+      .trim()
+      .toLowerCase() === adminEmail;
+
+  user.isAdmin = isAdmin;
+
+  return isAdmin;
 }
 
 // ============================================================
@@ -300,9 +304,7 @@ async function sendPasswordResetEmail(
           <h2>Reset your DeeDee's password</h2>
 
           <p>
-            Hello ${escapeHtml(
-              user.name || "there"
-            )},
+            Hello ${escapeHtml(user.name || "there")},
           </p>
 
           <p>
@@ -403,19 +405,14 @@ app.post(
       referralCode,
     } = req.body;
 
-    if (
-      !name ||
-      !email ||
-      !password
-    ) {
+    if (!name || !email || !password) {
       return res.status(400).json({
         error:
           "name, email and password are required",
       });
     }
 
-    const users =
-      await db.users.all();
+    const users = await db.users.all();
 
     const normalizedEmail =
       email.trim().toLowerCase();
@@ -436,56 +433,44 @@ app.post(
     let referredBy = null;
 
     if (referralCode) {
-      const referrer =
-        users.find(
-          (u) =>
-            u.referralCode ===
-            referralCode
-              .trim()
-              .toUpperCase()
-        );
+      const referrer = users.find(
+        (u) =>
+          u.referralCode ===
+          referralCode.trim().toUpperCase()
+      );
 
       if (referrer) {
-        referredBy =
-          referrer.id;
+        referredBy = referrer.id;
       }
     }
 
-    const adminEmail =
-      (
-        process.env.ADMIN_EMAIL ||
-        ""
-      )
-        .trim()
-        .toLowerCase();
+    const adminEmail = (
+      process.env.ADMIN_EMAIL || ""
+    )
+      .trim()
+      .toLowerCase();
 
     const newUser = {
       id: crypto.randomUUID(),
       name: name.trim(),
       email: normalizedEmail,
-      passwordHash:
-        hashPassword(password),
+      passwordHash: hashPassword(password),
       walletBalance: 0,
       isAdmin:
         adminEmail !== "" &&
-        normalizedEmail ===
-          adminEmail,
+        normalizedEmail === adminEmail,
       purchasedItemIds: [],
-      referralCode:
-        generateReferralCode(),
+      referralCode: generateReferralCode(),
       referredBy,
-      referralRewardProcessed:
-        false,
-      createdAt:
-        new Date().toISOString(),
+      referralRewardProcessed: false,
+      createdAt: new Date().toISOString(),
     };
 
     users.push(newUser);
 
     await db.users.save(users);
 
-    const token =
-      createToken(newUser);
+    const token = createToken(newUser);
 
     res.status(201).json({
       token,
@@ -506,17 +491,29 @@ app.post(
       password,
     } = req.body;
 
-    const users =
-      await db.users.all();
+    const users = await db.users.all();
 
-    const user =
-      users.find(
-        (u) =>
-          u.email.toLowerCase() ===
-          (email || "")
-            .trim()
-            .toLowerCase()
-      );
+    const user = users.find(
+      (u) =>
+        u.email.toLowerCase() ===
+        (email || "").trim().toLowerCase()
+    );
+
+    // IMPORTANT:
+    // Synchronize ADMIN_EMAIL for existing accounts.
+    // This fixes an account that was created before
+    // ADMIN_EMAIL was added to Render.
+    if (user) {
+      const oldAdminStatus = !!user.isAdmin;
+
+      syncAdminStatus(user);
+
+      if (
+        oldAdminStatus !== !!user.isAdmin
+      ) {
+        await db.users.save(users);
+      }
+    }
 
     if (
       !user ||
@@ -531,8 +528,7 @@ app.post(
       });
     }
 
-    const token =
-      createToken(user);
+    const token = createToken(user);
 
     res.json({
       token,
@@ -548,27 +544,21 @@ app.post(
 app.post(
   "/api/auth/forgot-password",
   async (req, res) => {
-    const { email } =
-      req.body;
+    const { email } = req.body;
 
     if (!email) {
       return res.status(400).json({
-        error:
-          "Email is required",
+        error: "Email is required",
       });
     }
 
-    const users =
-      await db.users.all();
+    const users = await db.users.all();
 
-    const user =
-      users.find(
-        (u) =>
-          u.email.toLowerCase() ===
-          email
-            .trim()
-            .toLowerCase()
-      );
+    const user = users.find(
+      (u) =>
+        u.email.toLowerCase() ===
+        email.trim().toLowerCase()
+    );
 
     if (!user) {
       return res.json({
@@ -581,8 +571,7 @@ app.post(
       const {
         token,
         tokenHash,
-      } =
-        createPasswordResetToken();
+      } = createPasswordResetToken();
 
       user.passwordResetTokenHash =
         tokenHash;
@@ -623,27 +612,21 @@ app.post(
 app.post(
   "/api/auth/resend-password-reset",
   async (req, res) => {
-    const { email } =
-      req.body;
+    const { email } = req.body;
 
     if (!email) {
       return res.status(400).json({
-        error:
-          "Email is required",
+        error: "Email is required",
       });
     }
 
-    const users =
-      await db.users.all();
+    const users = await db.users.all();
 
-    const user =
-      users.find(
-        (u) =>
-          u.email.toLowerCase() ===
-          email
-            .trim()
-            .toLowerCase()
-      );
+    const user = users.find(
+      (u) =>
+        u.email.toLowerCase() ===
+        email.trim().toLowerCase()
+    );
 
     if (!user) {
       return res.json({
@@ -656,8 +639,7 @@ app.post(
       const {
         token,
         tokenHash,
-      } =
-        createPasswordResetToken();
+      } = createPasswordResetToken();
 
       user.passwordResetTokenHash =
         tokenHash;
@@ -703,10 +685,7 @@ app.post(
       password,
     } = req.body;
 
-    if (
-      !token ||
-      !password
-    ) {
+    if (!token || !password) {
       return res.status(400).json({
         error:
           "Reset token and new password are required",
@@ -726,15 +705,13 @@ app.post(
         .update(token)
         .digest("hex");
 
-    const users =
-      await db.users.all();
+    const users = await db.users.all();
 
-    const user =
-      users.find(
-        (u) =>
-          u.passwordResetTokenHash ===
-          tokenHash
-      );
+    const user = users.find(
+      (u) =>
+        u.passwordResetTokenHash ===
+        tokenHash
+    );
 
     if (!user) {
       return res.status(400).json({
@@ -777,20 +754,29 @@ app.get(
   "/api/me",
   requireAuth,
   async (req, res) => {
-    const users =
-      await db.users.all();
+    const users = await db.users.all();
 
-    const user =
-      users.find(
-        (u) =>
-          u.id === req.user.id
-      );
+    const user = users.find(
+      (u) => u.id === req.user.id
+    );
 
     if (!user) {
       return res.status(404).json({
-        error:
-          "User not found",
+        error: "User not found",
       });
+    }
+
+    // IMPORTANT:
+    // Also synchronize existing users when /api/me
+    // is called, so ADMIN_EMAIL takes effect immediately.
+    const oldAdminStatus = !!user.isAdmin;
+
+    syncAdminStatus(user);
+
+    if (
+      oldAdminStatus !== !!user.isAdmin
+    ) {
+      await db.users.save(users);
     }
 
     const [
@@ -803,29 +789,24 @@ app.get(
 
     const myPurchases =
       purchases.filter(
-        (p) =>
-          p.buyerId === user.id
+        (p) => p.buyerId === user.id
       );
 
     const purchasedItems =
       items
         .filter((i) =>
-          user.purchasedItemIds.includes(
-            i.id
-          )
+          user.purchasedItemIds.includes(i.id)
         )
         .map((i) => {
           const relatedPurchases =
             myPurchases.filter(
-              (p) =>
-                p.itemId === i.id
+              (p) => p.itemId === i.id
             );
 
           const assignedCredentials =
             relatedPurchases.flatMap(
               (p) =>
-                p.assignedCredentials ||
-                []
+                p.assignedCredentials || []
             );
 
           const accessLink =
@@ -865,36 +846,29 @@ app.get(
 
     const myPurchases =
       purchases.filter(
-        (p) =>
-          p.buyerId ===
-          req.user.id
+        (p) => p.buyerId === req.user.id
       );
 
     const orders =
       myPurchases.map((p) => {
         const item =
           items.find(
-            (i) =>
-              i.id === p.itemId
+            (i) => i.id === p.itemId
           );
 
         const assignedCredentials =
-          p.assignedCredentials ||
-          [];
+          p.assignedCredentials || [];
 
         const accessLink =
           assignedCredentials[0] ||
-          (item &&
-            item.accessLink) ||
+          (item && item.accessLink) ||
           null;
 
         return {
           id: p.id,
-          purchasedAt:
-            p.createdAt,
+          purchasedAt: p.createdAt,
           price: p.price,
-          quantity:
-            p.quantity || 1,
+          quantity: p.quantity || 1,
           assignedCredentials,
           item: item
             ? {
@@ -917,44 +891,34 @@ app.get(
   "/api/my-referrals",
   requireAuth,
   async (req, res) => {
-    const users =
-      await db.users.all();
+    const users = await db.users.all();
 
-    const user =
-      users.find(
-        (u) =>
-          u.id === req.user.id
-      );
+    const user = users.find(
+      (u) => u.id === req.user.id
+    );
 
     if (!user) {
       return res.status(404).json({
-        error:
-          "User not found",
+        error: "User not found",
       });
     }
 
     const referredUsers =
       users.filter(
-        (u) =>
-          u.referredBy ===
-          user.id
+        (u) => u.referredBy === user.id
       );
 
     const successfulReferrals =
       referredUsers.filter(
-        (u) =>
-          u.referralRewardProcessed
+        (u) => u.referralRewardProcessed
       ).length;
 
     res.json({
-      referralCode:
-        user.referralCode,
-      totalReferred:
-        referredUsers.length,
+      referralCode: user.referralCode,
+      totalReferred: referredUsers.length,
       successfulReferrals,
       totalEarned:
-        successfulReferrals *
-        500,
+        successfulReferrals * 500,
     });
   }
 );
@@ -966,37 +930,28 @@ app.get(
 app.get(
   "/api/items",
   async (req, res) => {
-    const items =
-      await db.items.all();
+    const items = await db.items.all();
 
-    res.json(
-      items.map(publicItem)
-    );
+    res.json(items.map(publicItem));
   }
 );
 
 app.get(
   "/api/items/:id",
   async (req, res) => {
-    const items =
-      await db.items.all();
+    const items = await db.items.all();
 
-    const item =
-      items.find(
-        (i) =>
-          i.id === req.params.id
-      );
+    const item = items.find(
+      (i) => i.id === req.params.id
+    );
 
     if (!item) {
       return res.status(404).json({
-        error:
-          "Item not found",
+        error: "Item not found",
       });
     }
 
-    res.json(
-      publicItem(item)
-    );
+    res.json(publicItem(item));
   }
 );
 
@@ -1009,8 +964,7 @@ app.get(
   requireAuth,
   requireAdmin,
   async (req, res) => {
-    const items =
-      await db.items.all();
+    const items = await db.items.all();
 
     res.json(items);
   }
@@ -1034,39 +988,27 @@ app.post(
       quantity,
     } = req.body;
 
-    if (
-      !name ||
-      price == null
-    ) {
+    if (!name || price == null) {
       return res.status(400).json({
         error:
           "name and price are required",
       });
     }
 
-    const items =
-      await db.items.all();
+    const items = await db.items.all();
 
     const newItem = {
       id: crypto.randomUUID(),
       name,
-      description:
-        description || "",
+      description: description || "",
       price: Number(price),
       imageUrl:
-        imageUrl ||
-        image ||
-        "",
-      categoryId:
-        categoryId || null,
+        imageUrl || image || "",
+      categoryId: categoryId || null,
       accessLinks:
-        Array.isArray(
-          accessLinks
-        )
+        Array.isArray(accessLinks)
           ? accessLinks
-              .map((x) =>
-                String(x).trim()
-              )
+              .map((x) => String(x).trim())
               .filter(Boolean)
           : [],
       accessLink:
@@ -1087,9 +1029,7 @@ app.post(
 
     await db.items.save(items);
 
-    res.status(201).json(
-      newItem
-    );
+    res.status(201).json(newItem);
   }
 );
 
@@ -1098,19 +1038,15 @@ app.put(
   requireAuth,
   requireAdmin,
   async (req, res) => {
-    const items =
-      await db.items.all();
+    const items = await db.items.all();
 
-    const item =
-      items.find(
-        (i) =>
-          i.id === req.params.id
-      );
+    const item = items.find(
+      (i) => i.id === req.params.id
+    );
 
     if (!item) {
       return res.status(404).json({
-        error:
-          "Item not found",
+        error: "Item not found",
       });
     }
 
@@ -1129,47 +1065,28 @@ app.put(
     if (name !== undefined)
       item.name = name;
 
-    if (
-      description !== undefined
-    )
-      item.description =
-        description;
+    if (description !== undefined)
+      item.description = description;
 
     if (price !== undefined)
-      item.price =
-        Number(price);
+      item.price = Number(price);
 
-    if (
-      imageUrl !== undefined
-    )
-      item.imageUrl =
-        imageUrl;
-    else if (
-      image !== undefined
-    )
+    if (imageUrl !== undefined)
+      item.imageUrl = imageUrl;
+    else if (image !== undefined)
       item.imageUrl = image;
 
-    if (
-      categoryId !== undefined
-    )
-      item.categoryId =
-        categoryId;
+    if (categoryId !== undefined)
+      item.categoryId = categoryId;
 
     if (inStock !== undefined)
-      item.inStock =
-        inStock;
+      item.inStock = inStock;
 
-    if (
-      accessLink !== undefined
-    )
-      item.accessLink =
-        accessLink;
+    if (accessLink !== undefined)
+      item.accessLink = accessLink;
 
-    if (
-      quantity !== undefined
-    )
-      item.quantity =
-        Number(quantity);
+    if (quantity !== undefined)
+      item.quantity = Number(quantity);
 
     await db.items.save(items);
 
@@ -1186,15 +1103,11 @@ app.post(
   requireAuth,
   requireAdmin,
   async (req, res) => {
-    const { credentials } =
-      req.body;
+    const { credentials } = req.body;
 
     if (
-      !Array.isArray(
-        credentials
-      ) ||
-      credentials.filter(Boolean)
-        .length === 0
+      !Array.isArray(credentials) ||
+      credentials.filter(Boolean).length === 0
     ) {
       return res.status(400).json({
         error:
@@ -1202,40 +1115,28 @@ app.post(
       });
     }
 
-    const items =
-      await db.items.all();
+    const items = await db.items.all();
 
-    const item =
-      items.find(
-        (i) =>
-          i.id === req.params.id
-      );
+    const item = items.find(
+      (i) => i.id === req.params.id
+    );
 
     if (!item) {
       return res.status(404).json({
-        error:
-          "Item not found",
+        error: "Item not found",
       });
     }
 
-    if (
-      !Array.isArray(
-        item.accessLinks
-      )
-    ) {
+    if (!Array.isArray(item.accessLinks)) {
       item.accessLinks = [];
     }
 
     const cleaned =
       credentials
-        .map((c) =>
-          String(c).trim()
-        )
+        .map((c) => String(c).trim())
         .filter(Boolean);
 
-    item.accessLinks.push(
-      ...cleaned
-    );
+    item.accessLinks.push(...cleaned);
 
     item.inStock = true;
 
@@ -1259,24 +1160,19 @@ app.post(
   requireAuth,
   requireAdmin,
   async (req, res) => {
-    const items =
-      await db.items.all();
+    const items = await db.items.all();
 
-    const item =
-      items.find(
-        (i) =>
-          i.id === req.params.id
-      );
+    const item = items.find(
+      (i) => i.id === req.params.id
+    );
 
     if (!item) {
       return res.status(404).json({
-        error:
-          "Item not found",
+        error: "Item not found",
       });
     }
 
-    item.inStock =
-      !item.inStock;
+    item.inStock = !item.inStock;
 
     await db.items.save(items);
 
@@ -1293,35 +1189,27 @@ app.delete(
   requireAuth,
   requireAdmin,
   async (req, res) => {
-    const items =
-      await db.items.all();
+    const items = await db.items.all();
 
-    const item =
-      items.find(
-        (i) =>
-          i.id === req.params.id
-      );
+    const item = items.find(
+      (i) => i.id === req.params.id
+    );
 
     if (!item) {
       return res.status(404).json({
-        error:
-          "Item not found",
+        error: "Item not found",
       });
     }
 
     const remaining =
       items.filter(
-        (i) =>
-          i.id !== req.params.id
+        (i) => i.id !== req.params.id
       );
 
-    await db.items.save(
-      remaining
-    );
+    await db.items.save(remaining);
 
     res.json({
-      message:
-        "Item deleted",
+      message: "Item deleted",
     });
   }
 );
@@ -1357,9 +1245,7 @@ app.get(
     let categories =
       await db.categories.all();
 
-    if (
-      categories.length === 0
-    ) {
+    if (categories.length === 0) {
       categories =
         DEFAULT_CATEGORIES.map(
           (c) => ({
@@ -1370,9 +1256,7 @@ app.get(
           })
         );
 
-      await db.categories.save(
-        categories
-      );
+      await db.categories.save(categories);
     }
 
     res.json(categories);
@@ -1390,13 +1274,9 @@ app.post(
       icon,
     } = req.body;
 
-    if (
-      !name ||
-      !name.trim()
-    ) {
+    if (!name || !name.trim()) {
       return res.status(400).json({
-        error:
-          "name is required",
+        error: "name is required",
       });
     }
 
@@ -1406,25 +1286,17 @@ app.post(
     const newCategory = {
       id: crypto.randomUUID(),
       name: name.trim(),
-      description:
-        description || "",
-      icon:
-        icon || "Shield",
+      description: description || "",
+      icon: icon || "Shield",
       createdAt:
         new Date().toISOString(),
     };
 
-    categories.push(
-      newCategory
-    );
+    categories.push(newCategory);
 
-    await db.categories.save(
-      categories
-    );
+    await db.categories.save(categories);
 
-    res.status(201).json(
-      newCategory
-    );
+    res.status(201).json(newCategory);
   }
 );
 
@@ -1438,14 +1310,12 @@ app.put(
 
     const category =
       categories.find(
-        (c) =>
-          c.id === req.params.id
+        (c) => c.id === req.params.id
       );
 
     if (!category) {
       return res.status(404).json({
-        error:
-          "Category not found",
+        error: "Category not found",
       });
     }
 
@@ -1458,18 +1328,13 @@ app.put(
     if (name !== undefined)
       category.name = name;
 
-    if (
-      description !== undefined
-    )
-      category.description =
-        description;
+    if (description !== undefined)
+      category.description = description;
 
     if (icon !== undefined)
       category.icon = icon;
 
-    await db.categories.save(
-      categories
-    );
+    await db.categories.save(categories);
 
     res.json(category);
   }
@@ -1485,30 +1350,24 @@ app.delete(
 
     const category =
       categories.find(
-        (c) =>
-          c.id === req.params.id
+        (c) => c.id === req.params.id
       );
 
     if (!category) {
       return res.status(404).json({
-        error:
-          "Category not found",
+        error: "Category not found",
       });
     }
 
     const remaining =
       categories.filter(
-        (c) =>
-          c.id !== req.params.id
+        (c) => c.id !== req.params.id
       );
 
-    await db.categories.save(
-      remaining
-    );
+    await db.categories.save(remaining);
 
     res.json({
-      message:
-        "Category deleted",
+      message: "Category deleted",
     });
   }
 );
@@ -1521,16 +1380,12 @@ app.post(
   "/api/wallet/deposit/instant/initialize",
   requireAuth,
   async (req, res) => {
-    const { amount } =
-      req.body;
+    const { amount } = req.body;
 
-    const amountNumber =
-      Number(amount);
+    const amountNumber = Number(amount);
 
     if (
-      !Number.isFinite(
-        amountNumber
-      ) ||
+      !Number.isFinite(amountNumber) ||
       amountNumber <= 0
     ) {
       return res.status(400).json({
@@ -1539,19 +1394,15 @@ app.post(
       });
     }
 
-    const users =
-      await db.users.all();
+    const users = await db.users.all();
 
-    const user =
-      users.find(
-        (u) =>
-          u.id === req.user.id
-      );
+    const user = users.find(
+      (u) => u.id === req.user.id
+    );
 
     if (!user) {
       return res.status(404).json({
-        error:
-          "User not found",
+        error: "User not found",
       });
     }
 
@@ -1562,12 +1413,10 @@ app.post(
       const paystackData =
         await initializeTransaction({
           email: user.email,
-          amountNaira:
-            amountNumber,
+          amountNaira: amountNumber,
           reference,
           callback_url:
-            process.env
-              .PAYSTACK_CALLBACK_URL,
+            process.env.PAYSTACK_CALLBACK_URL,
         });
 
       const deposits =
@@ -1576,8 +1425,7 @@ app.post(
       deposits.push({
         id: crypto.randomUUID(),
         userId: user.id,
-        amount:
-          amountNumber,
+        amount: amountNumber,
         method: "instant",
         status: "pending",
         reference,
@@ -1585,9 +1433,7 @@ app.post(
           new Date().toISOString(),
       });
 
-      await db.deposits.save(
-        deposits
-      );
+      await db.deposits.save(deposits);
 
       res.status(201).json({
         authorizationUrl:
@@ -1623,35 +1469,27 @@ app.get(
           req.params.reference
         );
 
-      if (
-        result.status ===
-        "success"
-      ) {
+      if (result.status === "success") {
         await creditDepositByReference(
           req.params.reference,
           result.amount / 100
         );
       }
 
-      const users =
-        await db.users.all();
+      const users = await db.users.all();
 
-      const user =
-        users.find(
-          (u) =>
-            u.id === req.user.id
-        );
+      const user = users.find(
+        (u) => u.id === req.user.id
+      );
 
       if (!user) {
         return res.status(404).json({
-          error:
-            "User not found",
+          error: "User not found",
         });
       }
 
       res.json({
-        paymentStatus:
-          result.status,
+        paymentStatus: result.status,
         walletBalance:
           user.walletBalance,
       });
@@ -1703,9 +1541,7 @@ app.post(
 
     try {
       screenshotUrl =
-        await uploadScreenshot(
-          req.file
-        );
+        await uploadScreenshot(req.file);
     } catch (err) {
       console.error(err);
 
@@ -1731,13 +1567,9 @@ app.post(
 
     deposits.push(deposit);
 
-    await db.deposits.save(
-      deposits
-    );
+    await db.deposits.save(deposits);
 
-    res.status(201).json(
-      deposit
-    );
+    res.status(201).json(deposit);
   }
 );
 
@@ -1753,9 +1585,7 @@ app.get(
       (
         await db.deposits.all()
       ).filter(
-        (d) =>
-          d.userId ===
-          req.user.id
+        (d) => d.userId === req.user.id
       );
 
     res.json(deposits);
@@ -1778,8 +1608,7 @@ app.get(
       deposits =
         deposits.filter(
           (d) =>
-            d.status ===
-            req.query.status
+            d.status === req.query.status
         );
     }
 
@@ -1801,48 +1630,36 @@ app.post(
 
     const deposit =
       deposits.find(
-        (d) =>
-          d.id === req.params.id
+        (d) => d.id === req.params.id
       );
 
     if (!deposit) {
       return res.status(404).json({
-        error:
-          "Deposit not found",
+        error: "Deposit not found",
       });
     }
 
-    if (
-      deposit.status !==
-      "pending"
-    ) {
+    if (deposit.status !== "pending") {
       return res.status(400).json({
         error:
           `Deposit already ${deposit.status}`,
       });
     }
 
-    deposit.status =
-      "completed";
+    deposit.status = "completed";
 
-    await db.deposits.save(
-      deposits
-    );
+    await db.deposits.save(deposits);
 
-    const users =
-      await db.users.all();
+    const users = await db.users.all();
 
     const user =
       users.find(
-        (u) =>
-          u.id ===
-          deposit.userId
+        (u) => u.id === deposit.userId
       );
 
     if (!user) {
       return res.status(404).json({
-        error:
-          "User not found",
+        error: "User not found",
       });
     }
 
@@ -1874,37 +1691,27 @@ app.post(
 
     const deposit =
       deposits.find(
-        (d) =>
-          d.id === req.params.id
+        (d) => d.id === req.params.id
       );
 
     if (!deposit) {
       return res.status(404).json({
-        error:
-          "Deposit not found",
+        error: "Deposit not found",
       });
     }
 
-    if (
-      deposit.status !==
-      "pending"
-    ) {
+    if (deposit.status !== "pending") {
       return res.status(400).json({
         error:
           `Deposit already ${deposit.status}`,
       });
     }
 
-    deposit.status =
-      "rejected";
+    deposit.status = "rejected";
 
-    await db.deposits.save(
-      deposits
-    );
+    await db.deposits.save(deposits);
 
-    res.json({
-      deposit,
-    });
+    res.json({ deposit });
   }
 );
 
@@ -1923,8 +1730,7 @@ app.post(
 
     if (!itemId) {
       return res.status(400).json({
-        error:
-          "itemId is required",
+        error: "itemId is required",
       });
     }
 
@@ -1934,9 +1740,7 @@ app.post(
         : 1;
 
     if (
-      !Number.isInteger(
-        qtyToBuy
-      ) ||
+      !Number.isInteger(qtyToBuy) ||
       qtyToBuy < 1
     ) {
       return res.status(400).json({
@@ -1945,25 +1749,20 @@ app.post(
       });
     }
 
-    const items =
-      await db.items.all();
+    const items = await db.items.all();
 
     const item =
       items.find(
-        (i) =>
-          i.id === itemId
+        (i) => i.id === itemId
       );
 
     if (!item) {
       return res.status(404).json({
-        error:
-          "Item not found",
+        error: "Item not found",
       });
     }
 
-    if (
-      item.inStock === false
-    ) {
+    if (item.inStock === false) {
       return res.status(400).json({
         error:
           "This item is currently out of stock",
@@ -1973,29 +1772,23 @@ app.post(
     const availableQty =
       stockCountOf(item);
 
-    if (
-      availableQty <
-      qtyToBuy
-    ) {
+    if (availableQty < qtyToBuy) {
       return res.status(400).json({
         error:
           `Only ${availableQty} left in stock`,
       });
     }
 
-    const users =
-      await db.users.all();
+    const users = await db.users.all();
 
     const user =
       users.find(
-        (u) =>
-          u.id === req.user.id
+        (u) => u.id === req.user.id
       );
 
     if (!user) {
       return res.status(404).json({
-        error:
-          "User not found",
+        error: "User not found",
       });
     }
 
@@ -2004,9 +1797,7 @@ app.post(
 
     const isFirstPurchase =
       !purchases.some(
-        (p) =>
-          p.buyerId ===
-          user.id
+        (p) => p.buyerId === user.id
       );
 
     const eligibleForReferralDiscount =
@@ -2015,8 +1806,7 @@ app.post(
       !user.referralRewardProcessed;
 
     let totalPrice =
-      Number(item.price) *
-      qtyToBuy;
+      Number(item.price) * qtyToBuy;
 
     let discountApplied = 0;
 
@@ -2051,8 +1841,7 @@ app.post(
         user.purchasedItemIds
       )
     ) {
-      user.purchasedItemIds =
-        [];
+      user.purchasedItemIds = [];
     }
 
     if (
@@ -2060,20 +1849,14 @@ app.post(
         item.id
       )
     ) {
-      user.purchasedItemIds.push(
-        item.id
-      );
+      user.purchasedItemIds.push(item.id);
     }
 
-    let assignedCredentials =
-      [];
+    let assignedCredentials = [];
 
     if (
-      Array.isArray(
-        item.accessLinks
-      ) &&
-      item.accessLinks.length >
-        0
+      Array.isArray(item.accessLinks) &&
+      item.accessLinks.length > 0
     ) {
       assignedCredentials =
         item.accessLinks.splice(
@@ -2100,16 +1883,13 @@ app.post(
       item.sold = true;
     }
 
-    // Referral reward is only marked as processed
-    // when the referrer actually exists.
     if (
       eligibleForReferralDiscount
     ) {
       const referrer =
         users.find(
           (u) =>
-            u.id ===
-            user.referredBy
+            u.id === user.referredBy
         );
 
       if (referrer) {
@@ -2136,19 +1916,15 @@ app.post(
       quantity: qtyToBuy,
       assignedCredentials,
       referralDiscountApplied:
-        discountApplied ||
-        undefined,
+        discountApplied || undefined,
       createdAt:
         new Date().toISOString(),
     });
 
-    await db.purchases.save(
-      purchases
-    );
+    await db.purchases.save(purchases);
 
     res.json({
-      message:
-        "Purchase successful",
+      message: "Purchase successful",
       item: {
         ...publicItem(item),
         assignedCredentials,
@@ -2184,8 +1960,7 @@ app.get(
       purchases.map((p) => {
         const item =
           items.find(
-            (i) =>
-              i.id === p.itemId
+            (i) => i.id === p.itemId
           );
 
         return {
@@ -2250,17 +2025,11 @@ app.post(
         new Date().toISOString(),
     };
 
-    tickets.push(
-      newTicket
-    );
+    tickets.push(newTicket);
 
-    await db.tickets.save(
-      tickets
-    );
+    await db.tickets.save(tickets);
 
-    res.status(201).json(
-      newTicket
-    );
+    res.status(201).json(newTicket);
   }
 );
 
@@ -2291,16 +2060,11 @@ app.post(
   requireAuth,
   requireAdmin,
   async (req, res) => {
-    const { message } =
-      req.body;
+    const { message } = req.body;
 
-    if (
-      !message ||
-      !message.trim()
-    ) {
+    if (!message || !message.trim()) {
       return res.status(400).json({
-        error:
-          "message is required",
+        error: "message is required",
       });
     }
 
@@ -2309,36 +2073,26 @@ app.post(
 
     const ticket =
       tickets.find(
-        (t) =>
-          t.id ===
-          req.params.id
+        (t) => t.id === req.params.id
       );
 
     if (!ticket) {
       return res.status(404).json({
-        error:
-          "Ticket not found",
+        error: "Ticket not found",
       });
     }
 
-    if (
-      !Array.isArray(
-        ticket.replies
-      )
-    ) {
+    if (!Array.isArray(ticket.replies)) {
       ticket.replies = [];
     }
 
     ticket.replies.push({
-      message:
-        message.trim(),
+      message: message.trim(),
       createdAt:
         new Date().toISOString(),
     });
 
-    await db.tickets.save(
-      tickets
-    );
+    await db.tickets.save(tickets);
 
     res.json(ticket);
   }
@@ -2349,13 +2103,10 @@ app.post(
   requireAuth,
   requireAdmin,
   async (req, res) => {
-    const { status } =
-      req.body;
+    const { status } = req.body;
 
     if (
-      !["open", "resolved"].includes(
-        status
-      )
+      !["open", "resolved"].includes(status)
     ) {
       return res.status(400).json({
         error:
@@ -2368,24 +2119,18 @@ app.post(
 
     const ticket =
       tickets.find(
-        (t) =>
-          t.id ===
-          req.params.id
+        (t) => t.id === req.params.id
       );
 
     if (!ticket) {
       return res.status(404).json({
-        error:
-          "Ticket not found",
+        error: "Ticket not found",
       });
     }
 
-    ticket.status =
-      status;
+    ticket.status = status;
 
-    await db.tickets.save(
-      tickets
-    );
+    await db.tickets.save(tickets);
 
     res.json(ticket);
   }
@@ -2402,14 +2147,11 @@ async function startServer() {
   try {
     await initDatabase();
 
-    app.listen(
-      PORT,
-      () => {
-        console.log(
-          `Server running on http://localhost:${PORT}`
-        );
-      }
-    );
+    app.listen(PORT, () => {
+      console.log(
+        `Server running on http://localhost:${PORT}`
+      );
+    });
   } catch (error) {
     console.error(
       "Failed to initialize database:",
