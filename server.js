@@ -178,13 +178,14 @@ async function creditDepositByReference(
 // ============================================================
 
 function stockCountOf(item) {
-  if (
-    Array.isArray(item.accessLinks) &&
-    item.accessLinks.length > 0
-  ) {
+  // If this item uses a credential pool,
+  // the pool itself is the source of truth.
+  // IMPORTANT: return 0 when the pool is empty.
+  if (Array.isArray(item.accessLinks)) {
     return item.accessLinks.length;
   }
 
+  // Legacy/non-credential items use quantity.
   if (item.quantity != null) {
     return Math.max(0, Number(item.quantity));
   }
