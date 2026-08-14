@@ -1858,14 +1858,16 @@ app.post(
     let assignedCredentials = [];
 
     if (
-      Array.isArray(item.accessLinks) &&
-      item.accessLinks.length > 0
-    ) {
-      assignedCredentials =
-        item.accessLinks.splice(
-          0,
-          qtyToBuy
-        );
+  Array.isArray(item.accessLinks) &&
+  item.accessLinks.length > 0
+) {
+  assignedCredentials =
+    item.accessLinks.splice(
+      0,
+      qtyToBuy
+    );
+
+  item.quantity = item.accessLinks.length;
     } else if (
       item.quantity != null
     ) {
