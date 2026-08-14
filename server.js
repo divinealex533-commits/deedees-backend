@@ -1139,10 +1139,12 @@ app.post(
 
     item.accessLinks.push(...cleaned);
 
-    item.inStock = true;
+// Keep quantity synchronized with the credential pool.
+item.quantity = item.accessLinks.length;
 
-    await db.items.save(items);
+item.inStock = true;
 
+await db.items.save(items);
     res.json({
       message:
         `Added ${cleaned.length} credential(s)`,
