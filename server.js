@@ -68,36 +68,6 @@ async function tonyixPurchase(productId, quantity) {
   });
 }
 
-  let data;
-
-  try {
-    data = await response.json();
-  } catch {
-    throw new Error(
-      `Tonyix returned an invalid response (${response.status})`
-    );
-  }
-
-  if (!response.ok || data.success === false) {
-    throw new Error(
-      data.message ||
-      data.msg ||
-      `Tonyix request failed (${response.status})`
-    );
-  }
-
-  return data;
-}
-
-async function tonyixPurchase(productId, quantity = 1) {
-  return await tonyixRequest("/purchase", {
-    method: "POST",
-    body: JSON.stringify({
-      product: Number(productId),
-      qty: Number(quantity),
-    }),
-  });
-}
 import path from "path";
 import dotenv from "dotenv";
 import multer from "multer";
