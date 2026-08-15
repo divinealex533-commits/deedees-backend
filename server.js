@@ -430,7 +430,23 @@ function escapeHtml(value) {
 // ============================================================
 // HEALTH CHECK
 // ============================================================
+// ============================================================
+// TONYIX TEST — PRODUCTS
+// ============================================================
 
+app.get("/api/tonyix/products", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const result = await tonyixRequest("/products");
+
+    res.json(result);
+  } catch (error) {
+    console.error("Tonyix products error:", error);
+
+    res.status(502).json({
+      error: error.message || "Unable to connect to Tonyix",
+    });
+  }
+});
 app.get("/", (req, res) => {
   res.json({
     status: "ok",
