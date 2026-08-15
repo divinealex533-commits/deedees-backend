@@ -1,6 +1,53 @@
 import express from "express";
 import cors from "cors";
 import crypto from "crypto";
+// ============================================================
+// TONYIX API
+// ============================================================
+
+const TONYIX_BASE_URL = "https://tonyixlog.com/v1";
+
+async function tonyixRequest(endpoint, options = {}) {
+  const apiKey = process.env.TONYIX_API_KEY;
+
+  if (!apiKey) {
+    throw new Error("TONYIX_API_KEY is not configured");
+  }
+
+  const url =
+    `${TONYIX_BASE_URL}${endpoint}` +
+    `${endpoint.includes("?") ? "&" : "?"}` +
+    `api_key=${encodeURIComponent(apiKey)}`;
+
+  const response = await fetch(url, {
+    ...options,
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      ...(options.headers || {}),
+    },
+  });
+
+  let data;
+
+  try {
+    data = await response.json();
+  } catch {
+    throw new Error(
+      `Tonyix returned an invalid response (${response.status})`
+    );
+  }
+
+  if (!response.ok || data.success === false) {
+    throw new Error(
+      data.message ||
+      data.msg ||
+      `Tonyix request failed (${response.status})`
+    );
+  }
+
+  return data;
+}
 import path from "path";
 import dotenv from "dotenv";
 import multer from "multer";
