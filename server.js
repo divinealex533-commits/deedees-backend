@@ -1126,11 +1126,16 @@ app.post(
 
     const items = await db.items.all();
 
-    const newItem = {
+  const newItem = {
   id: crypto.randomUUID(),
+
   name,
-  description: description || "",
-  price: Number(price),
+
+  description:
+    description || "",
+
+  price:
+    Number(price),
 
   tonyixProductId:
     tonyixProductId != null
@@ -1139,27 +1144,33 @@ app.post(
 
   imageUrl:
     imageUrl || image || "",
+
+  categoryId:
+    categoryId || null,
+
+  accessLinks:
+    Array.isArray(accessLinks)
+      ? accessLinks
+          .map((x) => String(x).trim())
+          .filter(Boolean)
+      : [],
+
+  accessLink:
+    accessLink || undefined,
+
+  quantity:
+    quantity != null
+      ? Number(quantity)
+      : undefined,
+
+  inStock:
+    inStock !== undefined
+      ? inStock
+      : true,
+
+  createdAt:
+    new Date().toISOString(),
 };
-      categoryId: categoryId || null,
-      accessLinks:
-        Array.isArray(accessLinks)
-          ? accessLinks
-              .map((x) => String(x).trim())
-              .filter(Boolean)
-          : [],
-      accessLink:
-        accessLink || undefined,
-      quantity:
-        quantity != null
-          ? Number(quantity)
-          : undefined,
-      inStock:
-        inStock !== undefined
-          ? inStock
-          : true,
-      createdAt:
-        new Date().toISOString(),
-    };
 
     items.push(newItem);
 
@@ -1190,13 +1201,14 @@ app.put(
   name,
   description,
   price,
+  tonyixProductId,
   image,
   imageUrl,
   categoryId,
   inStock,
+  accessLinks,
   accessLink,
   quantity,
-  tonyixProductId,
 } = req.body;
 
     if (name !== undefined)
