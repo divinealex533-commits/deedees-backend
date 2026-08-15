@@ -54,7 +54,10 @@ async function tonyixRequest(endpoint, options = {}) {
   return data;
 }
 
-// Tonyix purchase function MUST be OUTSIDE tonyixRequest
+// ============================================================
+// TONYIX PURCHASE
+// ============================================================
+
 async function tonyixPurchase(productId, quantity) {
   return await tonyixRequest("/purchase", {
     method: "POST",
@@ -64,20 +67,6 @@ async function tonyixPurchase(productId, quantity) {
     }),
   });
 }
-
-  const url =
-    `${TONYIX_BASE_URL}${endpoint}` +
-    `${endpoint.includes("?") ? "&" : "?"}` +
-    `api_key=${encodeURIComponent(apiKey)}`;
-
-  const response = await fetch(url, {
-    ...options,
-    headers: {
-      Accept: "application/json",
-      "Content-Type": "application/json",
-      ...(options.headers || {}),
-    },
-  });
 
   let data;
 
