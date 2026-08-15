@@ -1098,17 +1098,18 @@ app.post(
   requireAdmin,
   async (req, res) => {
     const {
-      name,
-      description,
-      price,
-      image,
-      imageUrl,
-      categoryId,
-      inStock,
-      accessLinks,
-      accessLink,
-      quantity,
-    } = req.body;
+  name,
+  description,
+  price,
+  image,
+  imageUrl,
+  categoryId,
+  inStock,
+  accessLinks,
+  accessLink,
+  quantity,
+  tonyixProductId,
+} = req.body;
 
     if (!name || price == null) {
       return res.status(400).json({
@@ -1122,6 +1123,10 @@ app.post(
     const newItem = {
       id: crypto.randomUUID(),
       name,
+      tonyixProductId:
+  tonyixProductId != null
+    ? Number(tonyixProductId)
+    : null,
       description: description || "",
       price: Number(price),
       imageUrl:
@@ -1885,7 +1890,76 @@ app.post(
         error: "Item not found",
       });
     }
+// ============================================================
+// TONYIX PURCHASE
+// ============================================================
 
+if (item.tonyixProductId) {
+  try {
+    const tonyixResult = await tonyixPurchase(
+      item.tonyixProductId,
+      qtyToBuy
+    );
+
+    console.log(
+      "Tonyix purchase successful:",
+      tonyixResult
+    );
+
+    // Tonyix has supplied the product.
+    // DeeDee records the order locally.
+    const users = await db.users.all();
+
+    const user = users.find(
+      (u) => u.id === req.user.id
+    );
+
+    if (!user) {
+      return res.status(404).json({
+        error: "User not found",
+      });
+    }
+
+    const purchases =
+      await db.purchases.all();
+
+    purchases.push({
+      id: crypto.randomUUID(),
+      itemId: item.id,
+      buyerId: user.id,
+      buyerName: user.name,
+      buyerEmail: user.email,
+      price: Number(item.price) * qtyToBuy,
+      quantity: qtyToBuy,
+      tonyixOrderId:
+        tonyixResult?.data?.order_id || null,
+      tonyixResult,
+      createdAt:
+        new Date().toISOString(),
+    });
+
+    await db.purchases.save(purchases);
+
+    return res.json({
+      message: "Purchase successful",
+      orderId:
+        tonyixResult?.data?.order_id || null,
+      item: publicItem(item),
+      tonyix: tonyixResult,
+    });
+  } catch (error) {
+    console.error(
+      "Tonyix purchase error:",
+      error
+    );
+
+    return res.status(502).json({
+      error:
+        error.message ||
+        "Unable to complete purchase through Tonyix",
+    });
+  }
+}
     if (item.inStock === false) {
       return res.status(400).json({
         error:
