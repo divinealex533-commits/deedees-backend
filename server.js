@@ -484,59 +484,103 @@ app.post(
 // AUTH — LOGIN
 // ============================================================
 
+// ============================================================
+// AUTH — LOGIN
+// ============================================================
+
 app.post(
   "/api/auth/login",
   async (req, res) => {
-    const {
-      email,
-      password,
-    } = req.body;
+    try {
+      const {
+        email,
+        password,
+      } = req.body;
 
-    const users = await db.users.all();
+      const normalizedEmail =
+        (email || "").trim().toLowerCase();
 
-    const user = users.find(
-      (u) =>
-        u.email.toLowerCase() ===
-        (email || "").trim().toLowerCase()
-    );
+      if (!normalizedEmail || !password) {
+        return res.status(400).json({
+          error:
+            "Email and password are required",
+        });
+      }
 
-    // IMPORTANT:
-    // Synchronize ADMIN_EMAIL for existing accounts.
-    // This fixes an account that was created before
-    // ADMIN_EMAIL was added to Render.
-    if (user) {
-      const oldAdminStatus = !!user.isAdmin;
+      /*
+       * FAST LOOKUP:
+       * Instead of loading every user from PostgreSQL,
+       * find only the user who owns this email.
+       */
+      const user =
+        await db.users.findByEmail(
+          normalizedEmail
+        );
+
+      if (!user) {
+        return res.status(401).json({
+          error:
+            "Invalid email or password",
+        });
+      }
+
+      /*
+       * Synchronize admin status only when necessary.
+       * We no longer save the entire users table.
+       */
+      const oldAdminStatus =
+        !!user.isAdmin;
 
       syncAdminStatus(user);
 
       if (
-        oldAdminStatus !== !!user.isAdmin
+        oldAdminStatus !==
+        !!user.isAdmin
       ) {
-        await db.users.save(users);
+        await db.users.updateById(
+          user.id,
+          user
+        );
       }
-    }
 
-    if (
-      !user ||
-      !checkPassword(
-        password || "",
-        user.passwordHash
-      )
-    ) {
-      return res.status(401).json({
+      /*
+       * Check password after the user has
+       * been found directly.
+       */
+      const passwordValid =
+        checkPassword(
+          password,
+          user.passwordHash
+        );
+
+      if (!passwordValid) {
+        return res.status(401).json({
+          error:
+            "Invalid email or password",
+        });
+      }
+
+      const token =
+        createToken(user);
+
+      return res.json({
+        token,
+        user: publicUser(user),
+      });
+    } catch (error) {
+      console.error(
+        "Login error:",
+        error
+      );
+
+      return res.status(500).json({
         error:
-          "Invalid email or password",
+          "Unable to login right now. Please try again.",
       });
     }
-
-    const token = createToken(user);
-
-    res.json({
-      token,
-      user: publicUser(user),
-    });
   }
 );
+   
 
 // ============================================================
 // FORGOT PASSWORD
