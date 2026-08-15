@@ -5,6 +5,10 @@ import crypto from "crypto";
 // TONYIX API
 // ============================================================
 
+// ============================================================
+// TONYIX API
+// ============================================================
+
 const TONYIX_BASE_URL = "https://tonyixlog.com/v1";
 
 async function tonyixRequest(endpoint, options = {}) {
@@ -47,6 +51,16 @@ async function tonyixRequest(endpoint, options = {}) {
   }
 
   return data;
+}
+
+async function tonyixPurchase(productId, quantity = 1) {
+  return await tonyixRequest("/purchase", {
+    method: "POST",
+    body: JSON.stringify({
+      product: Number(productId),
+      qty: Number(quantity),
+    }),
+  });
 }
 import path from "path";
 import dotenv from "dotenv";
