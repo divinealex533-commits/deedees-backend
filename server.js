@@ -54,6 +54,52 @@ async function tonyixRequest(endpoint, options = {}) {
   return data;
 }
 
+// Tonyix purchase function MUST be OUTSIDE tonyixRequest
+async function tonyixPurchase(productId, quantity) {
+  return await tonyixRequest("/purchase", {
+    method: "POST",
+    body: JSON.stringify({
+      product: Number(productId),
+      qty: Number(quantity),
+    }),
+  });
+}
+
+  const url =
+    `${TONYIX_BASE_URL}${endpoint}` +
+    `${endpoint.includes("?") ? "&" : "?"}` +
+    `api_key=${encodeURIComponent(apiKey)}`;
+
+  const response = await fetch(url, {
+    ...options,
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      ...(options.headers || {}),
+    },
+  });
+
+  let data;
+
+  try {
+    data = await response.json();
+  } catch {
+    throw new Error(
+      `Tonyix returned an invalid response (${response.status})`
+    );
+  }
+
+  if (!response.ok || data.success === false) {
+    throw new Error(
+      data.message ||
+      data.msg ||
+      `Tonyix request failed (${response.status})`
+    );
+  }
+
+  return data;
+}
+
 async function tonyixPurchase(productId, quantity = 1) {
   return await tonyixRequest("/purchase", {
     method: "POST",
@@ -1122,27 +1168,19 @@ app.post(
     const items = await db.items.all();
 
     const newItem = {
-      id: crypto.randomUUID(),
-      name,
-      tonyixProductId:
-  tonyixProductId != null
-    ? Number(tonyixProductId)
-    : null,
-      
-      tonyixCostPrice:
-  tonyixProductId != null
-    ? Number(price)
-    : null,
-      description: description || "",
-      price:
-  tonyixProductId != null
-    ? Math.ceil(
-        Number(price) *
-          (1 + TONYIX_MARKUP)
-      )
-    : Number(price),
-      imageUrl:
-        imageUrl || image || "",
+  id: crypto.randomUUID(),
+  name,
+  description: description || "",
+  price: Number(price),
+
+  tonyixProductId:
+    tonyixProductId != null
+      ? Number(tonyixProductId)
+      : null,
+
+  imageUrl:
+    imageUrl || image || "",
+};
       categoryId: categoryId || null,
       accessLinks:
         Array.isArray(accessLinks)
@@ -1189,17 +1227,18 @@ app.put(
       });
     }
 
-    const {
-      name,
-      description,
-      price,
-      image,
-      imageUrl,
-      categoryId,
-      inStock,
-      accessLink,
-      quantity,
-    } = req.body;
+  const {
+  name,
+  description,
+  price,
+  image,
+  imageUrl,
+  categoryId,
+  inStock,
+  accessLink,
+  quantity,
+  tonyixProductId,
+} = req.body;
 
     if (name !== undefined)
       item.name = name;
@@ -1225,10 +1264,16 @@ app.put(
       item.accessLink = accessLink;
 
     if (quantity !== undefined)
-      item.quantity = Number(quantity);
+  item.quantity = Number(quantity);
 
-    await db.items.save(items);
+if (tonyixProductId !== undefined)
+  item.tonyixProductId =
+    tonyixProductId != null
+      ? Number(tonyixProductId)
+      : null;
 
+await db.items.save(items);
+   
     res.json(item);
   }
 );
@@ -1864,91 +1909,411 @@ app.post(
   "/api/purchase",
   requireAuth,
   async (req, res) => {
-    const {
-      itemId,
-      quantity,
-    } = req.body;
+    try {
+      const {
+        itemId,
+        quantity,
+      } = req.body;
 
-    if (!itemId) {
-      return res.status(400).json({
-        error: "itemId is required",
-      });
-    }
+      if (!itemId) {
+        return res.status(400).json({
+          error: "itemId is required",
+        });
+      }
 
-    const qtyToBuy =
-      quantity != null
-        ? Number(quantity)
-        : 1;
+      const qtyToBuy =
+        quantity != null
+          ? Number(quantity)
+          : 1;
 
-    if (
-      !Number.isInteger(qtyToBuy) ||
-      qtyToBuy < 1
-    ) {
-      return res.status(400).json({
-        error:
-          "Quantity must be a positive whole number",
-      });
-    }
+      if (
+        !Number.isInteger(qtyToBuy) ||
+        qtyToBuy < 1
+      ) {
+        return res.status(400).json({
+          error:
+            "Quantity must be a positive whole number",
+        });
+      }
 
-    const items = await db.items.all();
+      const items = await db.items.all();
 
-    const item =
-      items.find(
+      const item = items.find(
         (i) => i.id === itemId
       );
 
-    if (!item) {
-      return res.status(404).json({
-        error: "Item not found",
+      if (!item) {
+        return res.status(404).json({
+          error: "Item not found",
+        });
+      }
+
+      /*
+       * Tonyix products are fulfilled remotely.
+       * Local DeeDee products continue through
+       * the normal purchase logic below.
+       */
+
+      if (item.tonyixProductId) {
+        const users = await db.users.all();
+
+        const user = users.find(
+          (u) => u.id === req.user.id
+        );
+
+        if (!user) {
+          return res.status(404).json({
+            error: "User not found",
+          });
+        }
+
+        /*
+         * item.price is DeeDee's customer price.
+         * For a Tonyix product, that should already
+         * include the 70% markup.
+         *
+         * Example:
+         * Tonyix cost = ₦2,500
+         * DeeDee price = ₦4,250
+         */
+
+        const totalPrice =
+          Number(item.price) * qtyToBuy;
+
+        if (
+          Number(user.walletBalance || 0) <
+          totalPrice
+        ) {
+          return res.status(400).json({
+            error:
+              "Insufficient wallet balance",
+          });
+        }
+
+        /*
+         * Ask Tonyix to fulfil the order BEFORE
+         * deducting the customer's DeeDee wallet.
+         */
+        const tonyixResult =
+          await tonyixPurchase(
+            item.tonyixProductId,
+            qtyToBuy
+          );
+
+        if (
+          !tonyixResult ||
+          tonyixResult.success === false
+        ) {
+          return res.status(502).json({
+            error:
+              tonyixResult?.message ||
+              tonyixResult?.msg ||
+              "Tonyix could not complete the order",
+          });
+        }
+
+        /*
+         * Tonyix succeeded, so now charge DeeDee.
+         */
+        user.walletBalance =
+          Number(user.walletBalance || 0) -
+          totalPrice;
+
+        if (
+          !Array.isArray(
+            user.purchasedItemIds
+          )
+        ) {
+          user.purchasedItemIds = [];
+        }
+
+        if (
+          !user.purchasedItemIds.includes(
+            item.id
+          )
+        ) {
+          user.purchasedItemIds.push(item.id);
+        }
+
+        const purchases =
+          await db.purchases.all();
+
+        const tonyixOrderId =
+          tonyixResult?.data?.order_id ||
+          null;
+
+        /*
+         * Store only the authorized digital
+         * delivery information returned by Tonyix.
+         */
+        const deliveredItems =
+          Array.isArray(
+            tonyixResult?.data?.items
+          )
+            ? tonyixResult.data.items.map(
+                (product) => ({
+                  productName:
+                    product.product_name ||
+                    null,
+                  details:
+                    product.details ||
+                    null,
+                  url:
+                    product.url ||
+                    null,
+                })
+              )
+            : [];
+
+        purchases.push({
+          id: crypto.randomUUID(),
+          itemId: item.id,
+          buyerId: user.id,
+          buyerName: user.name,
+          buyerEmail: user.email,
+          price: totalPrice,
+          quantity: qtyToBuy,
+          tonyixOrderId,
+          assignedCredentials:
+            deliveredItems,
+          createdAt:
+            new Date().toISOString(),
+        });
+
+        await db.users.save(users);
+        await db.purchases.save(
+          purchases
+        );
+
+        return res.json({
+          message:
+            "Purchase successful",
+          orderId:
+            tonyixOrderId,
+          item: {
+            ...publicItem(item),
+            assignedCredentials:
+              deliveredItems,
+          },
+          newBalance:
+            user.walletBalance,
+          tonyix:
+            tonyixResult,
+        });
+      }
+
+      /*
+       * ======================================================
+       * NORMAL DEEDEE PRODUCT PURCHASE
+       * ======================================================
+       */
+
+      if (item.inStock === false) {
+        return res.status(400).json({
+          error:
+            "This item is currently out of stock",
+        });
+      }
+
+      const availableQty =
+        stockCountOf(item);
+
+      if (
+        availableQty < qtyToBuy
+      ) {
+        return res.status(400).json({
+          error:
+            `Only ${availableQty} left in stock`,
+        });
+      }
+
+      const users = await db.users.all();
+
+      const user = users.find(
+        (u) => u.id === req.user.id
+      );
+
+      if (!user) {
+        return res.status(404).json({
+          error: "User not found",
+        });
+      }
+
+      const purchases =
+        await db.purchases.all();
+
+      const isFirstPurchase =
+        !purchases.some(
+          (p) =>
+            p.buyerId === user.id
+        );
+
+      const eligibleForReferralDiscount =
+        isFirstPurchase &&
+        !!user.referredBy &&
+        !user.referralRewardProcessed;
+
+      let totalPrice =
+        Number(item.price) *
+        qtyToBuy;
+
+      let discountApplied = 0;
+
+      if (
+        eligibleForReferralDiscount
+      ) {
+        discountApplied =
+          Math.round(
+            totalPrice * 0.05
+          );
+
+        totalPrice -=
+          discountApplied;
+      }
+
+      if (
+        Number(
+          user.walletBalance || 0
+        ) < totalPrice
+      ) {
+        return res.status(400).json({
+          error:
+            "Insufficient wallet balance",
+        });
+      }
+
+      user.walletBalance =
+        Number(
+          user.walletBalance || 0
+        ) - totalPrice;
+
+      if (
+        !Array.isArray(
+          user.purchasedItemIds
+        )
+      ) {
+        user.purchasedItemIds = [];
+      }
+
+      if (
+        !user.purchasedItemIds.includes(
+          item.id
+        )
+      ) {
+        user.purchasedItemIds.push(
+          item.id
+        );
+      }
+
+      let assignedCredentials = [];
+
+      if (
+        Array.isArray(
+          item.accessLinks
+        ) &&
+        item.accessLinks.length > 0
+      ) {
+        assignedCredentials =
+          item.accessLinks.splice(
+            0,
+            qtyToBuy
+          );
+
+        item.quantity =
+          item.accessLinks.length;
+      } else if (
+        item.quantity != null
+      ) {
+        item.quantity =
+          Math.max(
+            0,
+            Number(item.quantity) -
+              qtyToBuy
+          );
+
+        if (item.accessLink) {
+          assignedCredentials =
+            Array(qtyToBuy).fill(
+              item.accessLink
+            );
+        }
+      } else {
+        item.sold = true;
+      }
+
+      if (
+        eligibleForReferralDiscount
+      ) {
+        const referrer =
+          users.find(
+            (u) =>
+              u.id ===
+              user.referredBy
+          );
+
+        if (referrer) {
+          user.referralRewardProcessed =
+            true;
+
+          referrer.walletBalance =
+            Number(
+              referrer.walletBalance ||
+                0
+            ) + 500;
+        }
+      }
+
+      await db.users.save(users);
+      await db.items.save(items);
+
+      purchases.push({
+        id: crypto.randomUUID(),
+        itemId: item.id,
+        buyerId: user.id,
+        buyerName: user.name,
+        buyerEmail: user.email,
+        price: totalPrice,
+        quantity: qtyToBuy,
+        assignedCredentials,
+        referralDiscountApplied:
+          discountApplied ||
+          undefined,
+        createdAt:
+          new Date().toISOString(),
       });
-    }
 
-    const purchases =
-      await db.purchases.all();
+      await db.purchases.save(
+        purchases
+      );
 
-    purchases.push({
-      id: crypto.randomUUID(),
-      itemId: item.id,
-      buyerId: user.id,
-      buyerName: user.name,
-      buyerEmail: user.email,
-      price: Number(item.price) * qtyToBuy,
-      quantity: qtyToBuy,
-      tonyixOrderId:
-        tonyixResult?.data?.order_id || null,
-      tonyixResult,
-      createdAt:
-        new Date().toISOString(),
-    });
+      return res.json({
+        message:
+          "Purchase successful",
+        item: {
+          ...publicItem(item),
+          assignedCredentials,
+          accessLink:
+            assignedCredentials[0] ||
+            null,
+        },
+        newBalance:
+          user.walletBalance,
+        discountApplied,
+      });
+    } catch (error) {
+      console.error(
+        "Purchase error:",
+        error
+      );
 
-    await db.purchases.save(purchases);
-
-    return res.json({
-      message: "Purchase successful",
-      orderId:
-        tonyixResult?.data?.order_id || null,
-      item: publicItem(item),
-      tonyix: tonyixResult,
-    });
-  } catch (error) {
-    console.error(
-      "Tonyix purchase error:",
-      error
-    );
-
-    return res.status(502).json({
-      error:
-        error.message ||
-        "Unable to complete purchase through Tonyix",
-    });
-  }
-}
-    if (item.inStock === false) {
-      return res.status(400).json({
+      return res.status(500).json({
         error:
-          "This item is currently out of stock",
+          error.message ||
+          "Unable to complete purchase",
       });
     }
+  }
+);
 // ============================================================
 // TONYIX PRODUCT PURCHASE
 // ============================================================
