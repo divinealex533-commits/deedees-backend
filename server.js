@@ -1919,11 +1919,9 @@ app.post(
         });
       }
 
-      /*
-       * Tonyix products are fulfilled remotely.
-       * Local DeeDee products continue through
-       * the normal purchase logic below.
-       */
+      // ============================================================
+      // TONYIX PRODUCT PURCHASE
+      // ============================================================
 
       if (item.tonyixProductId) {
         const users = await db.users.all();
@@ -1938,16 +1936,6 @@ app.post(
           });
         }
 
-        /*
-         * item.price is DeeDee's customer price.
-         * For a Tonyix product, that should already
-         * include the 70% markup.
-         *
-         * Example:
-         * Tonyix cost = ₦2,500
-         * DeeDee price = ₦4,250
-         */
-
         const totalPrice =
           Number(item.price) * qtyToBuy;
 
@@ -1961,10 +1949,7 @@ app.post(
           });
         }
 
-        /*
-         * Ask Tonyix to fulfil the order BEFORE
-         * deducting the customer's DeeDee wallet.
-         */
+        // Ask Tonyix to fulfil the order first.
         const tonyixResult =
           await tonyixPurchase(
             item.tonyixProductId,
@@ -1983,9 +1968,7 @@ app.post(
           });
         }
 
-        /*
-         * Tonyix succeeded, so now charge DeeDee.
-         */
+        // Tonyix succeeded, so charge the DeeDee wallet.
         user.walletBalance =
           Number(user.walletBalance || 0) -
           totalPrice;
@@ -2003,7 +1986,9 @@ app.post(
             item.id
           )
         ) {
-          user.purchasedItemIds.push(item.id);
+          user.purchasedItemIds.push(
+            item.id
+          );
         }
 
         const purchases =
@@ -2013,10 +1998,6 @@ app.post(
           tonyixResult?.data?.order_id ||
           null;
 
-        /*
-         * Store only the authorized digital
-         * delivery information returned by Tonyix.
-         */
         const deliveredItems =
           Array.isArray(
             tonyixResult?.data?.items
@@ -2073,11 +2054,9 @@ app.post(
         });
       }
 
-      /*
-       * ======================================================
-       * NORMAL DEEDEE PRODUCT PURCHASE
-       * ======================================================
-       */
+      // ============================================================
+      // NORMAL DEEDEE PRODUCT PURCHASE
+      // ============================================================
 
       if (item.inStock === false) {
         return res.status(400).json({
@@ -2218,8 +2197,7 @@ app.post(
         const referrer =
           users.find(
             (u) =>
-              u.id ===
-              user.referredBy
+              u.id === user.referredBy
           );
 
         if (referrer) {
@@ -2285,179 +2263,6 @@ app.post(
     }
   }
 );
-  
-    const availableQty =
-      stockCountOf(item);
-
-    if (availableQty < qtyToBuy) {
-      return res.status(400).json({
-        error:
-          `Only ${availableQty} left in stock`,
-      });
-    }
-
-    const users = await db.users.all();
-
-    const user =
-      users.find(
-        (u) => u.id === req.user.id
-      );
-
-    if (!user) {
-      return res.status(404).json({
-        error: "User not found",
-      });
-    }
-
-    const purchases =
-      await db.purchases.all();
-
-    const isFirstPurchase =
-      !purchases.some(
-        (p) => p.buyerId === user.id
-      );
-
-    const eligibleForReferralDiscount =
-      isFirstPurchase &&
-      !!user.referredBy &&
-      !user.referralRewardProcessed;
-
-    let totalPrice =
-      Number(item.price) * qtyToBuy;
-
-    let discountApplied = 0;
-
-    if (
-      eligibleForReferralDiscount
-    ) {
-      discountApplied =
-        Math.round(
-          totalPrice * 0.05
-        );
-
-      totalPrice -=
-        discountApplied;
-    }
-
-    if (
-      Number(user.walletBalance || 0) <
-      totalPrice
-    ) {
-      return res.status(400).json({
-        error:
-          "Insufficient wallet balance",
-      });
-    }
-
-    user.walletBalance =
-      Number(user.walletBalance || 0) -
-      totalPrice;
-
-    if (
-      !Array.isArray(
-        user.purchasedItemIds
-      )
-    ) {
-      user.purchasedItemIds = [];
-    }
-
-    if (
-      !user.purchasedItemIds.includes(
-        item.id
-      )
-    ) {
-      user.purchasedItemIds.push(item.id);
-    }
-
-    let assignedCredentials = [];
-
-    if (
-  Array.isArray(item.accessLinks) &&
-  item.accessLinks.length > 0
-) {
-  assignedCredentials =
-    item.accessLinks.splice(
-      0,
-      qtyToBuy
-    );
-
-  item.quantity = item.accessLinks.length;
-    } else if (
-      item.quantity != null
-    ) {
-      item.quantity =
-        Math.max(
-          0,
-          Number(item.quantity) -
-            qtyToBuy
-        );
-
-      if (item.accessLink) {
-        assignedCredentials =
-          Array(qtyToBuy).fill(
-            item.accessLink
-          );
-      }
-    } else {
-      item.sold = true;
-    }
-
-    if (
-      eligibleForReferralDiscount
-    ) {
-      const referrer =
-        users.find(
-          (u) =>
-            u.id === user.referredBy
-        );
-
-      if (referrer) {
-        user.referralRewardProcessed =
-          true;
-
-        referrer.walletBalance =
-          Number(
-            referrer.walletBalance || 0
-          ) + 500;
-      }
-    }
-
-    await db.users.save(users);
-    await db.items.save(items);
-
-    purchases.push({
-      id: crypto.randomUUID(),
-      itemId: item.id,
-      buyerId: user.id,
-      buyerName: user.name,
-      buyerEmail: user.email,
-      price: totalPrice,
-      quantity: qtyToBuy,
-      assignedCredentials,
-      referralDiscountApplied:
-        discountApplied || undefined,
-      createdAt:
-        new Date().toISOString(),
-    });
-
-    await db.purchases.save(purchases);
-
-    res.json({
-      message: "Purchase successful",
-      item: {
-        ...publicItem(item),
-        assignedCredentials,
-        accessLink:
-          assignedCredentials[0] ||
-          null,
-      },
-      newBalance:
-        user.walletBalance,
-      discountApplied,
-    });
-  }
-);
-
 // ============================================================
 // ADMIN SALES
 // ============================================================
