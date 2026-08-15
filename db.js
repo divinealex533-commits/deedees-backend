@@ -113,10 +113,52 @@ async function writeTable(name, rows) {
   }
 }
 
+/*
+ * FAST USER LOOKUP
+ *
+ * Login no longer needs to load the entire users table.
+ * PostgreSQL finds the matching email directly.
+ */
+async function findUserByEmail(email) {
+  const result = await pool.query(
+    `
+      SELECT data
+      FROM users
+      WHERE LOWER(data->>'email') = LOWER($1)
+      LIMIT 1
+    `,
+    [email]
+  );
+
+  return result.rows[0]?.data || null;
+}
+
+/*
+ * FAST USER UPDATE
+ *
+ * Updates only the matching user instead of deleting
+ * and reinserting the entire users table.
+ */
+async function updateUserById(userId, user) {
+  await pool.query(
+    `
+      UPDATE users
+      SET data = $1::jsonb
+      WHERE data->>'id' = $2
+    `,
+    [user, String(userId)]
+  );
+}
+
 export const db = {
   users: {
     all: () => readTable("users"),
     save: (rows) => writeTable("users", rows),
+
+    // New fast login helpers
+    findByEmail: (email) => findUserByEmail(email),
+    updateById: (userId, user) =>
+      updateUserById(userId, user),
   },
 
   items: {
