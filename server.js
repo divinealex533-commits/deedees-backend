@@ -434,7 +434,7 @@ function escapeHtml(value) {
 // TONYIX TEST — PRODUCTS
 // ============================================================
 
-app.get("/api/tonyix/products", requireAuth, requireAdmin, async (req, res) => {
+app.get("/api/tonyix/products", async (req, res) => {
   try {
     const result = await tonyixRequest("/products");
 
