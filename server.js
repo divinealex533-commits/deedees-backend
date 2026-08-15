@@ -10,6 +10,7 @@ import crypto from "crypto";
 // ============================================================
 
 const TONYIX_BASE_URL = "https://tonyixlog.com/v1";
+const TONYIX_MARKUP = 0.70;
 
 async function tonyixRequest(endpoint, options = {}) {
   const apiKey = process.env.TONYIX_API_KEY;
@@ -1127,8 +1128,19 @@ app.post(
   tonyixProductId != null
     ? Number(tonyixProductId)
     : null,
+      
+      tonyixCostPrice:
+  tonyixProductId != null
+    ? Number(price)
+    : null,
       description: description || "",
-      price: Number(price),
+      price:
+  tonyixProductId != null
+    ? Math.ceil(
+        Number(price) *
+          (1 + TONYIX_MARKUP)
+      )
+    : Number(price),
       imageUrl:
         imageUrl || image || "",
       categoryId: categoryId || null,
@@ -1890,35 +1902,6 @@ app.post(
         error: "Item not found",
       });
     }
-// ============================================================
-// TONYIX PURCHASE
-// ============================================================
-
-if (item.tonyixProductId) {
-  try {
-    const tonyixResult = await tonyixPurchase(
-      item.tonyixProductId,
-      qtyToBuy
-    );
-
-    console.log(
-      "Tonyix purchase successful:",
-      tonyixResult
-    );
-
-    // Tonyix has supplied the product.
-    // DeeDee records the order locally.
-    const users = await db.users.all();
-
-    const user = users.find(
-      (u) => u.id === req.user.id
-    );
-
-    if (!user) {
-      return res.status(404).json({
-        error: "User not found",
-      });
-    }
 
     const purchases =
       await db.purchases.all();
@@ -1966,7 +1949,143 @@ if (item.tonyixProductId) {
           "This item is currently out of stock",
       });
     }
+// ============================================================
+// TONYIX PRODUCT PURCHASE
+// ============================================================
 
+if (item.tonyixProductId) {
+  try {
+    const users = await db.users.all();
+
+    const user = users.find(
+      (u) => u.id === req.user.id
+    );
+
+    if (!user) {
+      return res.status(404).json({
+        error: "User not found",
+      });
+    }
+
+    const sellingPrice =
+      Number(item.price);
+
+    const totalPrice =
+      sellingPrice * qtyToBuy;
+
+    if (
+      Number(user.walletBalance || 0) <
+      totalPrice
+    ) {
+      return res.status(400).json({
+        error:
+          "Insufficient wallet balance",
+      });
+    }
+
+    // Ask Tonyix to fulfil the order first.
+    const tonyixResult =
+      await tonyixPurchase(
+        item.tonyixProductId,
+        qtyToBuy
+      );
+
+    if (
+      !tonyixResult ||
+      tonyixResult.success === false
+    ) {
+      return res.status(502).json({
+        error:
+          tonyixResult?.message ||
+          tonyixResult?.msg ||
+          "Tonyix could not complete the order",
+      });
+    }
+
+    // Tonyix confirmed the purchase.
+    // Now charge the DeeDee wallet.
+    user.walletBalance =
+      Number(user.walletBalance || 0) -
+      totalPrice;
+
+    if (
+      !Array.isArray(
+        user.purchasedItemIds
+      )
+    ) {
+      user.purchasedItemIds = [];
+    }
+
+    if (
+      !user.purchasedItemIds.includes(
+        item.id
+      )
+    ) {
+      user.purchasedItemIds.push(item.id);
+    }
+
+    const purchases =
+      await db.purchases.all();
+
+    const tonyixOrderId =
+      tonyixResult?.data?.order_id ||
+      null;
+
+    const deliveredItems =
+  Array.isArray(tonyixResult?.data?.items)
+    ? tonyixResult.data.items.map((product) => ({
+        productName:
+          product.product_name || null,
+        details:
+          product.details || null,
+        url:
+          product.url || null,
+      }))
+    : [];
+
+    purchases.push({
+      id: crypto.randomUUID(),
+      itemId: item.id,
+      buyerId: user.id,
+      buyerName: user.name,
+      buyerEmail: user.email,
+      price: totalPrice,
+      quantity: qtyToBuy,
+      tonyixOrderId,
+      assignedCredentials:
+        deliveredItems,
+      createdAt:
+        new Date().toISOString(),
+    });
+
+    await db.users.save(users);
+    await db.purchases.save(purchases);
+
+    return res.json({
+      message: "Purchase successful",
+      orderId: tonyixOrderId,
+      item: {
+        ...publicItem(item),
+        assignedCredentials:
+          deliveredItems,
+      },
+      newBalance:
+        user.walletBalance,
+      tonyix: tonyixResult,
+    });
+  } catch (error) {
+    console.error(
+      "Tonyix purchase error:",
+      error
+    );
+
+    return res.status(502).json({
+      error:
+        error.message ||
+        "Unable to complete Tonyix purchase",
+    });
+  }
+}
     const availableQty =
       stockCountOf(item);
 
