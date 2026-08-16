@@ -548,6 +548,11 @@ function createSellerProfile() {
     sellerPlanExpiresAt: null,
     sellerSubscriptionReference: null,
 
+    sellerRenewalReminderSentAt: null,
+    sellerFrozenAt: null,
+    sellerFreezeReason: null,
+    sellerRenewalPaymentReference: null,
+    
     sellerStoreName: "",
     sellerStoreSlug: "",
     sellerDescription: "",
