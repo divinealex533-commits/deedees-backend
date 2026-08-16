@@ -1402,48 +1402,46 @@ app.get(
   "/api/my-referrals",
   requireAuth,
   async (req, res) => {
-    const users =
-      await db.users.all();
+    const users = await db.users.all();
 
-    const user =
-      users.find(
-        (u) =>
-          u.id ===
-          req.user.id
-      );
+    const user = users.find(
+      (u) => u.id === req.user.id
+    );
 
     if (!user) {
       return res.status(404).json({
-        error:
-          "User not found",
+        error: "User not found",
       });
+    }
+
+    // Generate a referral code for older accounts
+    // that were created before referrals were added.
+    if (!user.referralCode) {
+      user.referralCode = generateReferralCode();
+
+      if (user.referralRewardProcessed === undefined) {
+        user.referralRewardProcessed = false;
+      }
+
+      await db.users.save(users);
     }
 
     const referredUsers =
       users.filter(
-        (u) =>
-          u.referredBy ===
-          user.id
+        (u) => u.referredBy === user.id
       );
 
     const successfulReferrals =
       referredUsers.filter(
-        (u) =>
-          u.referralRewardProcessed
+        (u) => u.referralRewardProcessed
       ).length;
 
     res.json({
-      referralCode:
-        user.referralCode,
-
-      totalReferred:
-        referredUsers.length,
-
+      referralCode: user.referralCode,
+      totalReferred: referredUsers.length,
       successfulReferrals,
-
       totalEarned:
-        successfulReferrals *
-        500,
+        successfulReferrals * 500,
     });
   }
 );
