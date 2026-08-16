@@ -1273,9 +1273,149 @@ function canSellerUsePlatform(user) {
     return false;
   }
 
-  if (isSellerFrozen(user)) {
+  // ============================================================
+// SELLER SUBSCRIPTION — 14-DAY RENEWAL REMINDER
+// ============================================================
+async function sendSellerRenewalReminder(user) {
+  if (!user) {
     return false;
   }
+  const plan = getSellerPlan(user);
+  if (!plan) {
+    return false;
+  }
+  // Standard Seller does not use subscription renewal reminders.
+  if (plan.id === "standard_seller") {
+    return false;
+  }
+  if (
+    plan.id !== "premium_monthly" &&
+    plan.id !== "premium_yearly"
+  ) {
+    return false;
+  }
+  if (
+    user.sellerPlanStatus !== "active"
+  ) {
+    return false;
+  }
+  const expiresAt =
+    Number(
+      user.sellerPlanExpiresAt || 0
+    );
+  if (!expiresAt) {
+    return false;
+  }
+  if (
+    !sellerSubscriptionNeedsRenewalReminder(
+      user
+    )
+  ) {
+    return false;
+  }
+  const users =
+    await db.users.all();
+  const currentUser =
+    users.find(
+      (u) =>
+        u.id === user.id
+    );
+  if (!currentUser) {
+    return false;
+  }
+  // Double-check so repeated calls cannot send
+  // the same reminder again.
+  if (
+    currentUser.sellerRenewalReminderSentAt
+  ) {
+    return false;
+  }
+  const email =
+    currentUser.email ||
+    currentUser.sellerSupportEmail ||
+    "";
+  if (!email) {
+    console.warn(
+      "Seller has no email for renewal reminder:",
+      currentUser.id
+    );
+    return false;
+  }
+  const expiresDate =
+    new Date(
+      expiresAt
+    ).toLocaleDateString(
+      "en-NG",
+      {
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+      }
+    );
+  try {
+    await resend.emails.send({
+      from:
+        process.env.RESEND_FROM_EMAIL ||
+        "DeeDee's Marketplace <onboarding@resend.dev>",
+      to: email,
+      subject:
+        "Your DeeDee's Seller Subscription Renews Soon",
+      html: `
+        <div style="font-family:Arial,sans-serif;line-height:1.6;">
+          <h2>Seller Subscription Renewal Reminder</h2>
+          <p>
+            Hello ${
+              currentUser.name ||
+              currentUser.username ||
+              "Seller"
+            },
+          </p>
+          <p>
+            Your
+            <strong>${plan.name}</strong>
+            seller subscription will expire on
+            <strong>${expiresDate}</strong>.
+          </p>
+          <p>
+            You have about
+            <strong>14 days</strong>
+            to renew your subscription and keep
+            your seller access active.
+          </p>
+          <p>
+            If your subscription expires without
+            renewal, your seller access will be
+            frozen until payment is confirmed and
+            an administrator unfreezes the account.
+          </p>
+          <p>
+            Please renew before the expiry date to
+            avoid interruption to your seller
+            activities.
+          </p>
+          <p>
+            Regards,<br />
+            <strong>DeeDee's Marketplace</strong>
+          </p>
+        </div>
+      `,
+    });
+    currentUser.sellerRenewalReminderSentAt =
+      new Date().toISOString();
+    await db.users.save(users);
+    console.log(
+      "Seller renewal reminder sent:",
+      currentUser.id
+    );
+    return true;
+  } catch (err) {
+    console.error(
+      "Seller renewal reminder failed:",
+      err
+    );
+    return false;
+  }
+}
 
   return hasSellerAccess(user);
 }
