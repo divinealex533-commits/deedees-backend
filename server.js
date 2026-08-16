@@ -542,16 +542,28 @@ function generateReferralCode() {
 function createSellerProfile() {
   return {
     isSeller: false,
+
+    sellerPlan: null,
+    sellerPlanStatus: "inactive",
+    sellerPlanExpiresAt: null,
+    sellerSubscriptionReference: null,
+
     sellerStoreName: "",
     sellerStoreSlug: "",
     sellerDescription: "",
     sellerLogoUrl: "",
+
     sellerMarkup: 0,
+
+    sellerSupportEmail: "",
+    sellerWhatsappLink: "",
+
     sellerPayoutEmail: "",
     sellerPayoutAccountName: "",
     sellerPayoutAccountNumber: "",
     sellerPayoutBankCode: "",
   };
+}
 }
 // ============================================================
 // ADMIN EMAIL SYNC
@@ -856,6 +868,140 @@ app.post(
   name:
     name.trim(),
 
+   // ============================================================
+// SELLER SUBSCRIPTION INFORMATION
+// ============================================================
+
+app.get(
+  "/api/seller/plans",
+  async (req, res) => {
+    res.json({
+      plans: Object.values(
+        SELLER_PLANS
+      ),
+    });
+  }
+);
+
+app.get(
+  "/api/seller/subscription",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const user =
+        await getCurrentSellerUser(
+          req
+        );
+
+      if (!user) {
+        return res.status(404).json({
+          error:
+            "User not found",
+        });
+      }
+
+      const plan =
+        getSellerPlan(user);
+
+      res.json({
+        isSeller:
+          hasSellerAccess(user),
+
+        plan: plan
+          ? {
+              id: plan.id,
+              name: plan.name,
+              price: plan.price,
+              currency:
+                plan.currency,
+              billing:
+                plan.billing,
+              features:
+                plan.features,
+            }
+          : null,
+
+        status:
+          user.sellerPlanStatus ||
+          "inactive",
+
+        expiresAt:
+          user.sellerPlanExpiresAt ||
+          null,
+
+        isPremium:
+          isPremiumSeller(user),
+
+        features: {
+          verifiedSeller:
+            hasSellerFeature(
+              user,
+              "verified_seller"
+            ),
+
+          sellerDashboard:
+            hasSellerFeature(
+              user,
+              "seller_dashboard"
+            ),
+
+          ownProducts:
+            hasSellerFeature(
+              user,
+              "own_products"
+            ),
+
+          withdrawEarnings:
+            hasSellerFeature(
+              user,
+              "withdraw_earnings"
+            ),
+
+          storefrontLink:
+            hasSellerFeature(
+              user,
+              "storefront_link"
+            ),
+
+          customBranding:
+            hasSellerFeature(
+              user,
+              "custom_branding"
+            ),
+
+          tonyixProducts:
+            hasSellerFeature(
+              user,
+              "tonyix_products"
+            ),
+
+          supportDetails:
+            hasSellerFeature(
+              user,
+              "support_details"
+            ),
+
+          productMarkup:
+            hasSellerFeature(
+              user,
+              "product_markup"
+            ),
+        },
+      });
+    } catch (error) {
+      console.error(
+        "Seller subscription status error:",
+        error
+      );
+
+      res.status(500).json({
+        error:
+          "Unable to load seller subscription",
+      });
+    }
+  }
+);
+    
   // ============================================================
   // SELLER FOUNDATION
   // ============================================================
@@ -905,6 +1051,331 @@ app.post(
     });
   }
 );
+
+// ============================================================
+// SELLER SUBSCRIPTION PLANS
+// ============================================================
+
+const SELLER_PLANS = {
+  standard_seller: {
+    id: "standard_seller",
+    name: "Standard Seller",
+    price: 50000,
+    currency: "NGN",
+    billing: "one_time",
+
+    features: [
+      "verified_seller",
+      "seller_dashboard",
+      "own_products",
+      "seller_earnings",
+      "withdraw_earnings",
+    ],
+  },
+
+  premium_monthly: {
+    id: "premium_monthly",
+    name: "Premium Monthly",
+    price: 30000,
+    currency: "NGN",
+    billing: "monthly",
+
+    features: [
+      "verified_seller",
+      "seller_dashboard",
+      "own_products",
+      "seller_earnings",
+      "withdraw_earnings",
+      "storefront_link",
+      "custom_branding",
+      "tonyix_products",
+      "support_details",
+      "product_markup",
+    ],
+  },
+
+  premium_yearly: {
+    id: "premium_yearly",
+    name: "Premium Yearly",
+    price: 120000,
+    currency: "NGN",
+    billing: "yearly",
+
+    features: [
+      "verified_seller",
+      "seller_dashboard",
+      "own_products",
+      "seller_earnings",
+      "withdraw_earnings",
+      "storefront_link",
+      "custom_branding",
+      "tonyix_products",
+      "support_details",
+      "product_markup",
+    ],
+  },
+};
+
+function getSellerPlan(user) {
+  const planId =
+    user?.sellerPlan || null;
+
+  if (!planId) {
+    return null;
+  }
+
+  return (
+    SELLER_PLANS[planId] ||
+    null
+  );
+}
+
+function isPremiumSeller(user) {
+  const plan = getSellerPlan(user);
+
+  if (!plan) {
+    return false;
+  }
+
+  if (
+    plan.id !==
+      "premium_monthly" &&
+    plan.id !==
+      "premium_yearly"
+  ) {
+    return false;
+  }
+
+  const expiresAt =
+    Number(
+      user.sellerPlanExpiresAt || 0
+    );
+
+  if (
+    !expiresAt ||
+    Date.now() >= expiresAt
+  ) {
+    return false;
+  }
+
+  return (
+    user.sellerPlanStatus ===
+      "active"
+  );
+}
+
+function isStandardSeller(user) {
+  return (
+    user?.sellerPlan ===
+      "standard_seller" &&
+    user?.sellerPlanStatus ===
+      "active"
+  );
+}
+
+function hasSellerAccess(user) {
+  return (
+    isStandardSeller(user) ||
+    isPremiumSeller(user)
+  );
+}
+
+function hasSellerFeature(
+  user,
+  feature
+) {
+  const plan =
+    getSellerPlan(user);
+
+  if (!plan) {
+    return false;
+  }
+
+  if (
+    plan.id !==
+      "standard_seller" &&
+    !isPremiumSeller(user)
+  ) {
+    return false;
+  }
+
+  return plan.features.includes(
+    feature
+  );
+}
+
+function syncSellerSubscription(user) {
+  if (!user) {
+    return false;
+  }
+
+  let changed = false;
+
+  if (
+    user.sellerPlanStatus ===
+    undefined
+  ) {
+    user.sellerPlanStatus =
+      "inactive";
+    changed = true;
+  }
+
+  const plan =
+    getSellerPlan(user);
+
+  if (
+    plan &&
+    (
+      plan.id ===
+        "premium_monthly" ||
+      plan.id ===
+        "premium_yearly"
+    )
+  ) {
+    const expiresAt =
+      Number(
+        user.sellerPlanExpiresAt ||
+          0
+      );
+
+    if (
+      user.sellerPlanStatus ===
+        "active" &&
+      expiresAt > 0 &&
+      Date.now() >= expiresAt
+    ) {
+      user.sellerPlanStatus =
+        "expired";
+
+      changed = true;
+    }
+  }
+
+  return changed;
+}
+
+async function getCurrentSellerUser(
+  req
+) {
+  const users =
+    await db.users.all();
+
+  const user =
+    users.find(
+      (u) =>
+        u.id ===
+        req.user.id
+    );
+
+  if (!user) {
+    return null;
+  }
+
+  const changed =
+    syncSellerSubscription(
+      user
+    );
+
+  if (changed) {
+    await db.users.save(users);
+  }
+
+  return user;
+}
+
+// Seller must have an active Standard or Premium plan.
+async function requireSellerAccess(
+  req,
+  res,
+  next
+) {
+  try {
+    const user =
+      await getCurrentSellerUser(
+        req
+      );
+
+    if (!user) {
+      return res.status(404).json({
+        error:
+          "User not found",
+      });
+    }
+
+    if (
+      !hasSellerAccess(user)
+    ) {
+      return res.status(403).json({
+        error:
+          "An active seller subscription is required",
+        code:
+          "SELLER_SUBSCRIPTION_REQUIRED",
+      });
+    }
+
+    req.sellerUser =
+      user;
+
+    next();
+  } catch (error) {
+    console.error(
+      "Seller access check error:",
+      error
+    );
+
+    res.status(500).json({
+      error:
+        "Unable to verify seller access",
+    });
+  }
+}
+
+// Premium Monthly/Yearly only.
+async function requirePremiumSeller(
+  req,
+  res,
+  next
+) {
+  try {
+    const user =
+      await getCurrentSellerUser(
+        req
+      );
+
+    if (!user) {
+      return res.status(404).json({
+        error:
+          "User not found",
+      });
+    }
+
+    if (
+      !isPremiumSeller(user)
+    ) {
+      return res.status(403).json({
+        error:
+          "Premium Seller subscription is required for this feature",
+        code:
+          "PREMIUM_SUBSCRIPTION_REQUIRED",
+      });
+    }
+
+    req.sellerUser =
+      user;
+
+    next();
+  } catch (error) {
+    console.error(
+      "Premium seller access check error:",
+      error
+    );
+
+    res.status(500).json({
+      error:
+        "Unable to verify premium seller access",
+    });
+  }
+}
 
 // ============================================================
 // AUTH — LOGIN
@@ -1452,8 +1923,9 @@ app.get(
 
 // Get the current user's seller profile.
 app.get(
-  "/api/seller/profile",
+  "/api/seller/products",
   requireAuth,
+  requireSellerAccess,
   async (req, res) => {
     const users =
       await db.users.all();
@@ -1962,6 +2434,7 @@ app.post(
 app.post(
   "/api/seller/products",
   requireAuth,
+  requireSellerAccess,
   async (req, res) => {
     try {
       const {
@@ -2011,9 +2484,7 @@ app.post(
             "User not found",
         });
       }
-      // Automatically make the account a seller
-      // when they create their first seller product.
-      user.isSeller = true;
+      /
       const items =
         await db.items.all();
       const newItem = {
