@@ -1942,6 +1942,20 @@ app.post(
   createdAt:
     new Date().toISOString(),
 };
+      items.push(
+      newItem
+    );
+
+    await db.items.save(
+      items
+    );
+
+    res.status(201).json(
+      newItem
+    );
+  }
+);
+
 // ============================================================
 // SELLER — CREATE OWN PRODUCT
 // ============================================================
