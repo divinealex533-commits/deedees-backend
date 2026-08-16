@@ -21,6 +21,12 @@ const TABLES = new Set([
   "purchases",
   "categories",
   "tickets",
+
+  // Seller marketplace
+  "seller_storefronts",
+  "seller_subscriptions",
+  "seller_orders",
+  "seller_withdrawals",
 ]);
 
 function validateTable(name) {
@@ -67,6 +73,38 @@ async function initTables() {
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS tickets (
+      id SERIAL PRIMARY KEY,
+      data JSONB NOT NULL
+    );
+  `);
+
+  // ============================================================
+  // SELLER MARKETPLACE TABLES
+  // ============================================================
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS seller_storefronts (
+      id SERIAL PRIMARY KEY,
+      data JSONB NOT NULL
+    );
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS seller_subscriptions (
+      id SERIAL PRIMARY KEY,
+      data JSONB NOT NULL
+    );
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS seller_orders (
+      id SERIAL PRIMARY KEY,
+      data JSONB NOT NULL
+    );
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS seller_withdrawals (
       id SERIAL PRIMARY KEY,
       data JSONB NOT NULL
     );
@@ -164,6 +202,7 @@ async function processReferralReward(userId) {
 
     if (!user) {
       await client.query("ROLLBACK");
+
       return {
         rewarded: false,
         reason: "user_not_found",
@@ -245,7 +284,9 @@ async function processReferralReward(userId) {
 export const db = {
   users: {
     all: () => readTable("users"),
-    save: (rows) => writeTable("users", rows),
+
+    save: (rows) =>
+      writeTable("users", rows),
 
     findByEmail: (email) =>
       findUserByEmail(email),
@@ -258,28 +299,79 @@ export const db = {
   },
 
   items: {
-    all: () => readTable("items"),
-    save: (rows) => writeTable("items", rows),
+    all: () =>
+      readTable("items"),
+
+    save: (rows) =>
+      writeTable("items", rows),
   },
 
   deposits: {
-    all: () => readTable("deposits"),
-    save: (rows) => writeTable("deposits", rows),
+    all: () =>
+      readTable("deposits"),
+
+    save: (rows) =>
+      writeTable("deposits", rows),
   },
 
   purchases: {
-    all: () => readTable("purchases"),
-    save: (rows) => writeTable("purchases", rows),
+    all: () =>
+      readTable("purchases"),
+
+    save: (rows) =>
+      writeTable("purchases", rows),
   },
 
   categories: {
-    all: () => readTable("categories"),
-    save: (rows) => writeTable("categories", rows),
+    all: () =>
+      readTable("categories"),
+
+    save: (rows) =>
+      writeTable("categories", rows),
   },
 
   tickets: {
-    all: () => readTable("tickets"),
-    save: (rows) => writeTable("tickets", rows),
+    all: () =>
+      readTable("tickets"),
+
+    save: (rows) =>
+      writeTable("tickets", rows),
+  },
+
+  // ============================================================
+  // SELLER MARKETPLACE
+  // ============================================================
+
+  sellerStorefronts: {
+    all: () =>
+      readTable("seller_storefronts"),
+
+    save: (rows) =>
+      writeTable("seller_storefronts", rows),
+  },
+
+  sellerSubscriptions: {
+    all: () =>
+      readTable("seller_subscriptions"),
+
+    save: (rows) =>
+      writeTable("seller_subscriptions", rows),
+  },
+
+  sellerOrders: {
+    all: () =>
+      readTable("seller_orders"),
+
+    save: (rows) =>
+      writeTable("seller_orders", rows),
+  },
+
+  sellerWithdrawals: {
+    all: () =>
+      readTable("seller_withdrawals"),
+
+    save: (rows) =>
+      writeTable("seller_withdrawals", rows),
   },
 };
 
