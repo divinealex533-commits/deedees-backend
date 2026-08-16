@@ -1,13 +1,6 @@
 import express from "express";
 import cors from "cors";
 import crypto from "crypto";
-// ============================================================
-// TONYIX API
-// ============================================================
-
-// ============================================================
-// TONYIX API
-// ============================================================
 
 // ============================================================
 // TONYIX API
@@ -75,6 +68,7 @@ import { createClient } from "@supabase/supabase-js";
 import { Resend } from "resend";
 
 import { db, initDatabase } from "./db.js";
+
 import {
   hashPassword,
   checkPassword,
@@ -83,6 +77,7 @@ import {
   requireAdmin,
   createPasswordResetToken,
 } from "./auth.js";
+
 import {
   initializeTransaction,
   verifyTransaction,
@@ -96,7 +91,8 @@ const FRONTEND_URL =
   process.env.FRONTEND_URL ||
   "https://deedees-frontend.onrender.com";
 
-const PASSWORD_RESET_EXPIRY_MS = 60 * 60 * 1000;
+const PASSWORD_RESET_EXPIRY_MS =
+  60 * 60 * 1000;
 
 const app = express();
 
@@ -109,7 +105,8 @@ app.use(cors());
 const SUPABASE_URL =
   "https://rujxebbeufilpqlszzwz.supabase.co";
 
-const SUPABASE_BUCKET = "payment-screenshots";
+const SUPABASE_BUCKET =
+  "payment-screenshots";
 
 const supabase = createClient(
   SUPABASE_URL,
@@ -137,12 +134,19 @@ app.post(
         .digest("hex");
 
       if (signature !== expected) {
-        return res.status(401).send("Invalid signature");
+        return res
+          .status(401)
+          .send("Invalid signature");
       }
 
-      const event = JSON.parse(req.body.toString());
+      const event = JSON.parse(
+        req.body.toString()
+      );
 
-      if (event.event === "charge.success") {
+      if (
+        event.event ===
+        "charge.success"
+      ) {
         await creditDepositByReference(
           event.data.reference,
           event.data.amount / 100
@@ -151,7 +155,11 @@ app.post(
 
       res.sendStatus(200);
     } catch (err) {
-      console.error("Paystack webhook error:", err);
+      console.error(
+        "Paystack webhook error:",
+        err
+      );
+
       res.sendStatus(500);
     }
   }
@@ -172,17 +180,26 @@ const upload = multer({
 
 async function uploadScreenshot(file) {
   const ext =
-    path.extname(file.originalname) || ".jpg";
+    path.extname(file.originalname) ||
+    ".jpg";
 
-  const filename = `${crypto.randomUUID()}${ext}`;
+  const filename =
+    `${crypto.randomUUID()}${ext}`;
 
-  const { error: uploadError } =
+  const {
+    error: uploadError,
+  } =
     await supabase.storage
       .from(SUPABASE_BUCKET)
-      .upload(filename, file.buffer, {
-        contentType: file.mimetype,
-        upsert: false,
-      });
+      .upload(
+        filename,
+        file.buffer,
+        {
+          contentType:
+            file.mimetype,
+          upsert: false,
+        }
+      );
 
   if (uploadError) {
     throw new Error(
@@ -206,11 +223,13 @@ async function creditDepositByReference(
   reference,
   amountNaira
 ) {
-  const deposits = await db.deposits.all();
+  const deposits =
+    await db.deposits.all();
 
-  const deposit = deposits.find(
-    (d) => d.reference === reference
-  );
+  const deposit =
+    deposits.find(
+      (d) => d.reference === reference
+    );
 
   if (
     !deposit ||
@@ -221,19 +240,27 @@ async function creditDepositByReference(
 
   deposit.status = "completed";
 
-  await db.deposits.save(deposits);
-
-  const users = await db.users.all();
-
-  const user = users.find(
-    (u) => u.id === deposit.userId
+  await db.deposits.save(
+    deposits
   );
+
+  const users =
+    await db.users.all();
+
+  const user =
+    users.find(
+      (u) => u.id === deposit.userId
+    );
 
   if (user) {
     user.walletBalance =
-      Number(user.walletBalance || 0) +
       Number(
-        amountNaira || deposit.amount || 0
+        user.walletBalance || 0
+      ) +
+      Number(
+        amountNaira ||
+          deposit.amount ||
+          0
       );
 
     await db.users.save(users);
@@ -245,16 +272,21 @@ async function creditDepositByReference(
 // ============================================================
 
 function stockCountOf(item) {
-  // If this item uses a credential pool,
-  // the pool itself is the source of truth.
-  // IMPORTANT: return 0 when the pool is empty.
-  if (Array.isArray(item.accessLinks)) {
+  if (
+    Array.isArray(
+      item.accessLinks
+    )
+  ) {
     return item.accessLinks.length;
   }
 
-  // Legacy/non-credential items use quantity.
-  if (item.quantity != null) {
-    return Math.max(0, Number(item.quantity));
+  if (
+    item.quantity != null
+  ) {
+    return Math.max(
+      0,
+      Number(item.quantity)
+    );
   }
 
   return item.sold ? 0 : 1;
@@ -267,7 +299,8 @@ function publicItem(item) {
     ...safe
   } = item;
 
-  const stockCount = stockCountOf(item);
+  const stockCount =
+    stockCountOf(item);
 
   return {
     ...safe,
@@ -279,28 +312,43 @@ function publicItem(item) {
 }
 
 // ============================================================
-// TONYIX → DEEDEE AUTOMATIC PRODUCT SYNC
+// TONYIX PRODUCT SYNC
 // ============================================================
 
-function getTonyixProductsPayload(result) {
-  if (Array.isArray(result)) return result;
+function getTonyixProductsPayload(
+  result
+) {
+  if (Array.isArray(result))
+    return result;
 
-  if (Array.isArray(result.products)) {
+  if (
+    Array.isArray(
+      result.products
+    )
+  ) {
     return result.products;
   }
 
-  if (Array.isArray(result.data)) {
+  if (
+    Array.isArray(result.data)
+  ) {
     return result.data;
   }
 
-  if (Array.isArray(result.data?.products)) {
+  if (
+    Array.isArray(
+      result.data?.products
+    )
+  ) {
     return result.data.products;
   }
 
   return [];
 }
 
-function getTonyixProductId(product) {
+function getTonyixProductId(
+  product
+) {
   return (
     product.id ??
     product.product_id ??
@@ -310,7 +358,9 @@ function getTonyixProductId(product) {
   );
 }
 
-function getTonyixProductName(product) {
+function getTonyixProductName(
+  product
+) {
   return (
     product.name ??
     product.product_name ??
@@ -319,7 +369,9 @@ function getTonyixProductName(product) {
   );
 }
 
-function getTonyixProductPrice(product) {
+function getTonyixProductPrice(
+  product
+) {
   const value =
     product.price ??
     product.product_price ??
@@ -328,33 +380,54 @@ function getTonyixProductPrice(product) {
     product.amount ??
     product.selling_price;
 
-  const number = Number(value);
+  const number =
+    Number(value);
 
-  return Number.isFinite(number) ? number : null;
+  return Number.isFinite(
+    number
+  )
+    ? number
+    : null;
 }
 
 async function syncTonyixProducts() {
   try {
-    const result = await tonyixRequest("/products");
+    const result =
+      await tonyixRequest(
+        "/products"
+      );
 
-    const products = getTonyixProductsPayload(result);
+    const products =
+      getTonyixProductsPayload(
+        result
+      );
 
     if (!products.length) {
-      console.log("Tonyix sync: no products returned.");
+      console.log(
+        "Tonyix sync: no products returned."
+      );
+
       return;
     }
 
-    const items = await db.items.all();
+    const items =
+      await db.items.all();
 
     let created = 0;
     let updated = 0;
 
-    for (const product of products) {
+    for (
+      const product of products
+    ) {
       const tonyixProductId =
-        getTonyixProductId(product);
+        getTonyixProductId(
+          product
+        );
 
       const supplierPrice =
-        getTonyixProductPrice(product);
+        getTonyixProductPrice(
+          product
+        );
 
       if (
         tonyixProductId == null ||
@@ -365,21 +438,30 @@ async function syncTonyixProducts() {
 
       const deeDeePrice =
         Math.round(
-          supplierPrice * (1 + TONYIX_MARKUP)
+          supplierPrice *
+            (1 + TONYIX_MARKUP)
         );
 
-      let item = items.find(
-        (existing) =>
-          Number(existing.tonyixProductId) ===
-          Number(tonyixProductId)
-      );
+      let item =
+        items.find(
+          (existing) =>
+            Number(
+              existing.tonyixProductId
+            ) ===
+            Number(
+              tonyixProductId
+            )
+        );
 
       if (!item) {
         item = {
-          id: crypto.randomUUID(),
+          id:
+            crypto.randomUUID(),
 
           name:
-            getTonyixProductName(product),
+            getTonyixProductName(
+              product
+            ),
 
           description:
             product.description ||
@@ -389,7 +471,9 @@ async function syncTonyixProducts() {
             deeDeePrice,
 
           tonyixProductId:
-            Number(tonyixProductId),
+            Number(
+              tonyixProductId
+            ),
 
           tonyixSupplierPrice:
             supplierPrice,
@@ -403,14 +487,11 @@ async function syncTonyixProducts() {
           categoryId:
             null,
 
-          accessLinks:
-            [],
+          accessLinks: [],
 
-          quantity:
-            null,
+          quantity: null,
 
-          inStock:
-            true,
+          inStock: true,
 
           createdAt:
             new Date().toISOString(),
@@ -420,7 +501,9 @@ async function syncTonyixProducts() {
         created++;
       } else {
         item.name =
-          getTonyixProductName(product);
+          getTonyixProductName(
+            product
+          );
 
         item.tonyixSupplierPrice =
           supplierPrice;
@@ -429,10 +512,12 @@ async function syncTonyixProducts() {
           deeDeePrice;
 
         if (
-          product.description !== undefined
+          product.description !==
+          undefined
         ) {
           item.description =
-            product.description || "";
+            product.description ||
+            "";
         }
 
         if (
@@ -476,17 +561,16 @@ function generateReferralCode() {
 
 // ============================================================
 // ADMIN EMAIL SYNC
-// IMPORTANT:
-// This makes an EXISTING account admin when its email
-// matches ADMIN_EMAIL in Render environment variables.
 // ============================================================
 
 function syncAdminStatus(user) {
-  const adminEmail = (
-    process.env.ADMIN_EMAIL || ""
-  )
-    .trim()
-    .toLowerCase();
+  const adminEmail =
+    (
+      process.env.ADMIN_EMAIL ||
+      ""
+    )
+      .trim()
+      .toLowerCase();
 
   if (!adminEmail) {
     return false;
@@ -495,9 +579,11 @@ function syncAdminStatus(user) {
   const isAdmin =
     String(user.email || "")
       .trim()
-      .toLowerCase() === adminEmail;
+      .toLowerCase() ===
+    adminEmail;
 
-  user.isAdmin = isAdmin;
+  user.isAdmin =
+    isAdmin;
 
   return isAdmin;
 }
@@ -525,7 +611,9 @@ async function sendPasswordResetEmail(
   user,
   rawToken
 ) {
-  if (!process.env.RESEND_API_KEY) {
+  if (
+    !process.env.RESEND_API_KEY
+  ) {
     throw new Error(
       "RESEND_API_KEY is not configured"
     );
@@ -557,7 +645,9 @@ async function sendPasswordResetEmail(
           <h2>Reset your DeeDee's password</h2>
 
           <p>
-            Hello ${escapeHtml(user.name || "there")},
+            Hello ${escapeHtml(
+              user.name || "there"
+            )},
           </p>
 
           <p>
@@ -625,40 +715,73 @@ async function sendPasswordResetEmail(
 
 function escapeHtml(value) {
   return String(value)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
+    .replaceAll(
+      "&",
+      "&amp;"
+    )
+    .replaceAll(
+      "<",
+      "&lt;"
+    )
+    .replaceAll(
+      ">",
+      "&gt;"
+    )
+    .replaceAll(
+      '"',
+      "&quot;"
+    )
+    .replaceAll(
+      "'",
+      "&#039;"
+    );
 }
 
-// ============================================================
-// HEALTH CHECK
-// ============================================================
 // ============================================================
 // TONYIX TEST — PRODUCTS
 // ============================================================
 
-app.get("/api/tonyix/products", requireAuth, requireAdmin, async (req, res) => {
-  try {
-    const result = await tonyixRequest("/products");
+app.get(
+  "/api/tonyix/products",
+  requireAuth,
+  requireAdmin,
+  async (req, res) => {
+    try {
+      const result =
+        await tonyixRequest(
+          "/products"
+        );
 
-    res.json(result);
-  } catch (error) {
-    console.error("Tonyix products error:", error);
+      res.json(result);
+    } catch (error) {
+      console.error(
+        "Tonyix products error:",
+        error
+      );
 
-    res.status(502).json({
-      error: error.message || "Unable to connect to Tonyix",
+      res.status(502).json({
+        error:
+          error.message ||
+          "Unable to connect to Tonyix",
+      });
+    }
+  }
+);
+
+// ============================================================
+// HEALTH CHECK
+// ============================================================
+
+app.get(
+  "/",
+  (req, res) => {
+    res.json({
+      status: "ok",
+      message:
+        "DeeDee's Marketplace API is running",
     });
   }
-});
-app.get("/", (req, res) => {
-  res.json({
-    status: "ok",
-    message:
-      "DeeDee's Marketplace API is running",
-  });
-});
+);
 
 // ============================================================
 // AUTH — SIGNUP
@@ -674,17 +797,24 @@ app.post(
       referralCode,
     } = req.body;
 
-    if (!name || !email || !password) {
+    if (
+      !name ||
+      !email ||
+      !password
+    ) {
       return res.status(400).json({
         error:
           "name, email and password are required",
       });
     }
 
-    const users = await db.users.all();
+    const users =
+      await db.users.all();
 
     const normalizedEmail =
-      email.trim().toLowerCase();
+      email
+        .trim()
+        .toLowerCase();
 
     if (
       users.find(
@@ -702,55 +832,79 @@ app.post(
     let referredBy = null;
 
     if (referralCode) {
-      const referrer = users.find(
-        (u) =>
-          u.referralCode ===
-          referralCode.trim().toUpperCase()
-      );
+      const referrer =
+        users.find(
+          (u) =>
+            u.referralCode ===
+            referralCode
+              .trim()
+              .toUpperCase()
+        );
 
       if (referrer) {
-        referredBy = referrer.id;
+        referredBy =
+          referrer.id;
       }
     }
 
-    const adminEmail = (
-      process.env.ADMIN_EMAIL || ""
-    )
-      .trim()
-      .toLowerCase();
+    const adminEmail =
+      (
+        process.env.ADMIN_EMAIL ||
+        ""
+      )
+        .trim()
+        .toLowerCase();
 
     const newUser = {
-      id: crypto.randomUUID(),
-      name: name.trim(),
-      email: normalizedEmail,
-      passwordHash: hashPassword(password),
+      id:
+        crypto.randomUUID(),
+
+      name:
+        name.trim(),
+
+      email:
+        normalizedEmail,
+
+      passwordHash:
+        hashPassword(password),
+
       walletBalance: 0,
+
       isAdmin:
         adminEmail !== "" &&
-        normalizedEmail === adminEmail,
+        normalizedEmail ===
+          adminEmail,
+
       purchasedItemIds: [],
-      referralCode: generateReferralCode(),
+
+      referralCode:
+        generateReferralCode(),
+
       referredBy,
-      referralRewardProcessed: false,
-      createdAt: new Date().toISOString(),
+
+      referralRewardProcessed:
+        false,
+
+      createdAt:
+        new Date().toISOString(),
     };
 
     users.push(newUser);
 
-    await db.users.save(users);
+    await db.users.save(
+      users
+    );
 
-    const token = createToken(newUser);
+    const token =
+      createToken(newUser);
 
     res.status(201).json({
       token,
-      user: publicUser(newUser),
+      user:
+        publicUser(newUser),
     });
   }
 );
-
-// ============================================================
-// AUTH — LOGIN
-// ============================================================
 
 // ============================================================
 // AUTH — LOGIN
@@ -766,20 +920,20 @@ app.post(
       } = req.body;
 
       const normalizedEmail =
-        (email || "").trim().toLowerCase();
+        (email || "")
+          .trim()
+          .toLowerCase();
 
-      if (!normalizedEmail || !password) {
+      if (
+        !normalizedEmail ||
+        !password
+      ) {
         return res.status(400).json({
           error:
             "Email and password are required",
         });
       }
 
-      /*
-       * FAST LOOKUP:
-       * Instead of loading every user from PostgreSQL,
-       * find only the user who owns this email.
-       */
       const user =
         await db.users.findByEmail(
           normalizedEmail
@@ -792,10 +946,6 @@ app.post(
         });
       }
 
-      /*
-       * Synchronize admin status only when necessary.
-       * We no longer save the entire users table.
-       */
       const oldAdminStatus =
         !!user.isAdmin;
 
@@ -811,10 +961,6 @@ app.post(
         );
       }
 
-      /*
-       * Check password after the user has
-       * been found directly.
-       */
       const passwordValid =
         checkPassword(
           password,
@@ -833,7 +979,8 @@ app.post(
 
       return res.json({
         token,
-        user: publicUser(user),
+        user:
+          publicUser(user),
       });
     } catch (error) {
       console.error(
@@ -848,7 +995,6 @@ app.post(
     }
   }
 );
-   
 
 // ============================================================
 // FORGOT PASSWORD
@@ -857,21 +1003,27 @@ app.post(
 app.post(
   "/api/auth/forgot-password",
   async (req, res) => {
-    const { email } = req.body;
+    const { email } =
+      req.body;
 
     if (!email) {
       return res.status(400).json({
-        error: "Email is required",
+        error:
+          "Email is required",
       });
     }
 
-    const users = await db.users.all();
+    const users =
+      await db.users.all();
 
-    const user = users.find(
-      (u) =>
-        u.email.toLowerCase() ===
-        email.trim().toLowerCase()
-    );
+    const user =
+      users.find(
+        (u) =>
+          u.email.toLowerCase() ===
+          email
+            .trim()
+            .toLowerCase()
+      );
 
     if (!user) {
       return res.json({
@@ -884,7 +1036,8 @@ app.post(
       const {
         token,
         tokenHash,
-      } = createPasswordResetToken();
+      } =
+        createPasswordResetToken();
 
       user.passwordResetTokenHash =
         tokenHash;
@@ -893,7 +1046,9 @@ app.post(
         Date.now() +
         PASSWORD_RESET_EXPIRY_MS;
 
-      await db.users.save(users);
+      await db.users.save(
+        users
+      );
 
       await sendPasswordResetEmail(
         user,
@@ -925,21 +1080,27 @@ app.post(
 app.post(
   "/api/auth/resend-password-reset",
   async (req, res) => {
-    const { email } = req.body;
+    const { email } =
+      req.body;
 
     if (!email) {
       return res.status(400).json({
-        error: "Email is required",
+        error:
+          "Email is required",
       });
     }
 
-    const users = await db.users.all();
+    const users =
+      await db.users.all();
 
-    const user = users.find(
-      (u) =>
-        u.email.toLowerCase() ===
-        email.trim().toLowerCase()
-    );
+    const user =
+      users.find(
+        (u) =>
+          u.email.toLowerCase() ===
+          email
+            .trim()
+            .toLowerCase()
+      );
 
     if (!user) {
       return res.json({
@@ -952,7 +1113,8 @@ app.post(
       const {
         token,
         tokenHash,
-      } = createPasswordResetToken();
+      } =
+        createPasswordResetToken();
 
       user.passwordResetTokenHash =
         tokenHash;
@@ -961,7 +1123,9 @@ app.post(
         Date.now() +
         PASSWORD_RESET_EXPIRY_MS;
 
-      await db.users.save(users);
+      await db.users.save(
+        users
+      );
 
       await sendPasswordResetEmail(
         user,
@@ -998,7 +1162,10 @@ app.post(
       password,
     } = req.body;
 
-    if (!token || !password) {
+    if (
+      !token ||
+      !password
+    ) {
       return res.status(400).json({
         error:
           "Reset token and new password are required",
@@ -1018,13 +1185,15 @@ app.post(
         .update(token)
         .digest("hex");
 
-    const users = await db.users.all();
+    const users =
+      await db.users.all();
 
-    const user = users.find(
-      (u) =>
-        u.passwordResetTokenHash ===
-        tokenHash
-    );
+    const user =
+      users.find(
+        (u) =>
+          u.passwordResetTokenHash ===
+          tokenHash
+      );
 
     if (!user) {
       return res.status(400).json({
@@ -1050,7 +1219,9 @@ app.post(
     delete user.passwordResetTokenHash;
     delete user.passwordResetTokenExpiresAt;
 
-    await db.users.save(users);
+    await db.users.save(
+      users
+    );
 
     res.json({
       message:
@@ -1067,59 +1238,71 @@ app.get(
   "/api/me",
   requireAuth,
   async (req, res) => {
-    const users = await db.users.all();
+    const users =
+      await db.users.all();
 
-    const user = users.find(
-      (u) => u.id === req.user.id
-    );
+    const user =
+      users.find(
+        (u) => u.id === req.user.id
+      );
 
     if (!user) {
       return res.status(404).json({
-        error: "User not found",
+        error:
+          "User not found",
       });
     }
 
-    // IMPORTANT:
-    // Also synchronize existing users when /api/me
-    // is called, so ADMIN_EMAIL takes effect immediately.
-    const oldAdminStatus = !!user.isAdmin;
+    const oldAdminStatus =
+      !!user.isAdmin;
 
     syncAdminStatus(user);
 
     if (
-      oldAdminStatus !== !!user.isAdmin
+      oldAdminStatus !==
+      !!user.isAdmin
     ) {
-      await db.users.save(users);
+      await db.users.save(
+        users
+      );
     }
 
     const [
       items,
       purchases,
-    ] = await Promise.all([
-      db.items.all(),
-      db.purchases.all(),
-    ]);
+    ] =
+      await Promise.all([
+        db.items.all(),
+        db.purchases.all(),
+      ]);
 
     const myPurchases =
       purchases.filter(
-        (p) => p.buyerId === user.id
+        (p) =>
+          p.buyerId ===
+          user.id
       );
 
     const purchasedItems =
       items
         .filter((i) =>
-          user.purchasedItemIds.includes(i.id)
+          user.purchasedItemIds.includes(
+            i.id
+          )
         )
         .map((i) => {
           const relatedPurchases =
             myPurchases.filter(
-              (p) => p.itemId === i.id
+              (p) =>
+                p.itemId ===
+                i.id
             );
 
           const assignedCredentials =
             relatedPurchases.flatMap(
               (p) =>
-                p.assignedCredentials || []
+                p.assignedCredentials ||
+                []
             );
 
           const accessLink =
@@ -1152,47 +1335,62 @@ app.get(
     const [
       purchases,
       items,
-    ] = await Promise.all([
-      db.purchases.all(),
-      db.items.all(),
-    ]);
+    ] =
+      await Promise.all([
+        db.purchases.all(),
+        db.items.all(),
+      ]);
 
     const myPurchases =
       purchases.filter(
-        (p) => p.buyerId === req.user.id
+        (p) =>
+          p.buyerId ===
+          req.user.id
       );
 
     const orders =
-      myPurchases.map((p) => {
-        const item =
-          items.find(
-            (i) => i.id === p.itemId
-          );
+      myPurchases.map(
+        (p) => {
+          const item =
+            items.find(
+              (i) =>
+                i.id ===
+                p.itemId
+            );
 
-        const assignedCredentials =
-          p.assignedCredentials || [];
+          const assignedCredentials =
+            p.assignedCredentials ||
+            [];
 
-        const accessLink =
-          assignedCredentials[0] ||
-          (item && item.accessLink) ||
-          null;
+          const accessLink =
+            assignedCredentials[0] ||
+            (item &&
+              item.accessLink) ||
+            null;
 
-        return {
-          id: p.id,
-          purchasedAt: p.createdAt,
-          price: p.price,
-          quantity: p.quantity || 1,
-          assignedCredentials,
-          item: item
-            ? {
-                ...publicItem(item),
-                accessLink,
-              }
-            : null,
-        };
-      });
+          return {
+            id: p.id,
+            purchasedAt:
+              p.createdAt,
+            price: p.price,
+            quantity:
+              p.quantity || 1,
+            assignedCredentials,
+            item: item
+              ? {
+                  ...publicItem(
+                    item
+                  ),
+                  accessLink,
+                }
+              : null,
+          };
+        }
+      );
 
-    res.json({ orders });
+    res.json({
+      orders,
+    });
   }
 );
 
@@ -1204,34 +1402,48 @@ app.get(
   "/api/my-referrals",
   requireAuth,
   async (req, res) => {
-    const users = await db.users.all();
+    const users =
+      await db.users.all();
 
-    const user = users.find(
-      (u) => u.id === req.user.id
-    );
+    const user =
+      users.find(
+        (u) =>
+          u.id ===
+          req.user.id
+      );
 
     if (!user) {
       return res.status(404).json({
-        error: "User not found",
+        error:
+          "User not found",
       });
     }
 
     const referredUsers =
       users.filter(
-        (u) => u.referredBy === user.id
+        (u) =>
+          u.referredBy ===
+          user.id
       );
 
     const successfulReferrals =
       referredUsers.filter(
-        (u) => u.referralRewardProcessed
+        (u) =>
+          u.referralRewardProcessed
       ).length;
 
     res.json({
-      referralCode: user.referralCode,
-      totalReferred: referredUsers.length,
+      referralCode:
+        user.referralCode,
+
+      totalReferred:
+        referredUsers.length,
+
       successfulReferrals,
+
       totalEarned:
-        successfulReferrals * 500,
+        successfulReferrals *
+        500,
     });
   }
 );
@@ -1243,28 +1455,40 @@ app.get(
 app.get(
   "/api/items",
   async (req, res) => {
-    const items = await db.items.all();
+    const items =
+      await db.items.all();
 
-    res.json(items.map(publicItem));
+    res.json(
+      items.map(
+        publicItem
+      )
+    );
   }
 );
 
 app.get(
   "/api/items/:id",
   async (req, res) => {
-    const items = await db.items.all();
+    const items =
+      await db.items.all();
 
-    const item = items.find(
-      (i) => i.id === req.params.id
-    );
+    const item =
+      items.find(
+        (i) =>
+          i.id ===
+          req.params.id
+      );
 
     if (!item) {
       return res.status(404).json({
-        error: "Item not found",
+        error:
+          "Item not found",
       });
     }
 
-    res.json(publicItem(item));
+    res.json(
+      publicItem(item)
+    );
   }
 );
 
@@ -1277,7 +1501,8 @@ app.get(
   requireAuth,
   requireAdmin,
   async (req, res) => {
-    const items = await db.items.all();
+    const items =
+      await db.items.all();
 
     res.json(items);
   }
@@ -1289,79 +1514,97 @@ app.post(
   requireAdmin,
   async (req, res) => {
     const {
-  name,
-  description,
-  price,
-  image,
-  imageUrl,
-  categoryId,
-  inStock,
-  accessLinks,
-  accessLink,
-  quantity,
-  tonyixProductId,
-} = req.body;
+      name,
+      description,
+      price,
+      image,
+      imageUrl,
+      categoryId,
+      inStock,
+      accessLinks,
+      accessLink,
+      quantity,
+      tonyixProductId,
+    } = req.body;
 
-    if (!name || price == null) {
+    if (
+      !name ||
+      price == null
+    ) {
       return res.status(400).json({
         error:
           "name and price are required",
       });
     }
 
-    const items = await db.items.all();
+    const items =
+      await db.items.all();
 
-  const newItem = {
-  id: crypto.randomUUID(),
+    const newItem = {
+      id:
+        crypto.randomUUID(),
 
-  name,
+      name,
 
-  description:
-    description || "",
+      description:
+        description || "",
 
-  price:
-    Number(price),
+      price:
+        Number(price),
 
-  tonyixProductId:
-    tonyixProductId != null
-      ? Number(tonyixProductId)
-      : null,
+      tonyixProductId:
+        tonyixProductId != null
+          ? Number(
+              tonyixProductId
+            )
+          : null,
 
-  imageUrl:
-    imageUrl || image || "",
+      imageUrl:
+        imageUrl ||
+        image ||
+        "",
 
-  categoryId:
-    categoryId || null,
+      categoryId:
+        categoryId || null,
 
-  accessLinks:
-    Array.isArray(accessLinks)
-      ? accessLinks
-          .map((x) => String(x).trim())
-          .filter(Boolean)
-      : [],
+      accessLinks:
+        Array.isArray(
+          accessLinks
+        )
+          ? accessLinks
+              .map((x) =>
+                String(x).trim()
+              )
+              .filter(Boolean)
+          : [],
 
-  accessLink:
-    accessLink || undefined,
+      accessLink:
+        accessLink ||
+        undefined,
 
-  quantity:
-    quantity != null
-      ? Number(quantity)
-      : undefined,
+      quantity:
+        quantity != null
+          ? Number(quantity)
+          : undefined,
 
-  inStock:
-    inStock !== undefined
-      ? inStock
-      : true,
+      inStock:
+        inStock !== undefined
+          ? inStock
+          : true,
 
-  createdAt:
-    new Date().toISOString(),
-};
+      createdAt:
+        new Date().toISOString(),
+    };
 
     items.push(newItem);
 
-    await db.items.save(items);
+    await db.items.save(
+      items
+    );
 
-    res.status(201).json(newItem);
+    res.status(201).json(
+      newItem
+    );
   }
 );
 
@@ -1370,66 +1613,125 @@ app.put(
   requireAuth,
   requireAdmin,
   async (req, res) => {
-    const items = await db.items.all();
+    const items =
+      await db.items.all();
 
-    const item = items.find(
-      (i) => i.id === req.params.id
-    );
+    const item =
+      items.find(
+        (i) =>
+          i.id ===
+          req.params.id
+      );
 
     if (!item) {
       return res.status(404).json({
-        error: "Item not found",
+        error:
+          "Item not found",
       });
     }
 
-  const {
-  name,
-  description,
-  price,
-  tonyixProductId,
-  image,
-  imageUrl,
-  categoryId,
-  inStock,
-  accessLinks,
-  accessLink,
-  quantity,
-} = req.body;
+    const {
+      name,
+      description,
+      price,
+      tonyixProductId,
+      image,
+      imageUrl,
+      categoryId,
+      inStock,
+      accessLinks,
+      accessLink,
+      quantity,
+    } = req.body;
 
-    if (name !== undefined)
+    if (
+      name !== undefined
+    )
       item.name = name;
 
-    if (description !== undefined)
-      item.description = description;
+    if (
+      description !==
+      undefined
+    )
+      item.description =
+        description;
 
-    if (price !== undefined)
-      item.price = Number(price);
+    if (
+      price !== undefined
+    )
+      item.price =
+        Number(price);
 
-    if (imageUrl !== undefined)
-      item.imageUrl = imageUrl;
-    else if (image !== undefined)
-      item.imageUrl = image;
+    if (
+      imageUrl !==
+      undefined
+    )
+      item.imageUrl =
+        imageUrl;
+    else if (
+      image !== undefined
+    )
+      item.imageUrl =
+        image;
 
-    if (categoryId !== undefined)
-      item.categoryId = categoryId;
+    if (
+      categoryId !==
+      undefined
+    )
+      item.categoryId =
+        categoryId;
 
-    if (inStock !== undefined)
-      item.inStock = inStock;
+    if (
+      inStock !==
+      undefined
+    )
+      item.inStock =
+        inStock;
 
-    if (accessLink !== undefined)
-      item.accessLink = accessLink;
+    if (
+      accessLinks !==
+      undefined &&
+      Array.isArray(
+        accessLinks
+      )
+    ) {
+      item.accessLinks =
+        accessLinks
+          .map((x) =>
+            String(x).trim()
+          )
+          .filter(Boolean);
+    }
 
-    if (quantity !== undefined)
-  item.quantity = Number(quantity);
+    if (
+      accessLink !==
+      undefined
+    )
+      item.accessLink =
+        accessLink;
 
-if (tonyixProductId !== undefined)
-  item.tonyixProductId =
-    tonyixProductId != null
-      ? Number(tonyixProductId)
-      : null;
+    if (
+      quantity !==
+      undefined
+    )
+      item.quantity =
+        Number(quantity);
 
-await db.items.save(items);
-   
+    if (
+      tonyixProductId !==
+      undefined
+    )
+      item.tonyixProductId =
+        tonyixProductId != null
+          ? Number(
+              tonyixProductId
+            )
+          : null;
+
+    await db.items.save(
+      items
+    );
+
     res.json(item);
   }
 );
@@ -1443,11 +1745,16 @@ app.post(
   requireAuth,
   requireAdmin,
   async (req, res) => {
-    const { credentials } = req.body;
+    const {
+      credentials,
+    } = req.body;
 
     if (
-      !Array.isArray(credentials) ||
-      credentials.filter(Boolean).length === 0
+      !Array.isArray(
+        credentials
+      ) ||
+      credentials.filter(Boolean)
+        .length === 0
     ) {
       return res.status(400).json({
         error:
@@ -1455,38 +1762,56 @@ app.post(
       });
     }
 
-    const items = await db.items.all();
+    const items =
+      await db.items.all();
 
-    const item = items.find(
-      (i) => i.id === req.params.id
-    );
+    const item =
+      items.find(
+        (i) =>
+          i.id ===
+          req.params.id
+      );
 
     if (!item) {
       return res.status(404).json({
-        error: "Item not found",
+        error:
+          "Item not found",
       });
     }
 
-    if (!Array.isArray(item.accessLinks)) {
-      item.accessLinks = [];
+    if (
+      !Array.isArray(
+        item.accessLinks
+      )
+    ) {
+      item.accessLinks =
+        [];
     }
 
     const cleaned =
       credentials
-        .map((c) => String(c).trim())
+        .map((c) =>
+          String(c).trim()
+        )
         .filter(Boolean);
 
-    item.accessLinks.push(...cleaned);
+    item.accessLinks.push(
+      ...cleaned
+    );
 
-// Keep quantity synchronized with the credential pool.
-item.quantity = item.accessLinks.length;
+    item.quantity =
+      item.accessLinks.length;
 
-item.inStock = true;
+    item.inStock = true;
 
-await db.items.save(items);
+    await db.items.save(
+      items
+    );
+
     res.json({
       message:
         `Added ${cleaned.length} credential(s)`,
+
       stockCount:
         item.accessLinks.length,
     });
@@ -1502,21 +1827,29 @@ app.post(
   requireAuth,
   requireAdmin,
   async (req, res) => {
-    const items = await db.items.all();
+    const items =
+      await db.items.all();
 
-    const item = items.find(
-      (i) => i.id === req.params.id
-    );
+    const item =
+      items.find(
+        (i) =>
+          i.id ===
+          req.params.id
+      );
 
     if (!item) {
       return res.status(404).json({
-        error: "Item not found",
+        error:
+          "Item not found",
       });
     }
 
-    item.inStock = !item.inStock;
+    item.inStock =
+      !item.inStock;
 
-    await db.items.save(items);
+    await db.items.save(
+      items
+    );
 
     res.json(item);
   }
@@ -1531,27 +1864,37 @@ app.delete(
   requireAuth,
   requireAdmin,
   async (req, res) => {
-    const items = await db.items.all();
+    const items =
+      await db.items.all();
 
-    const item = items.find(
-      (i) => i.id === req.params.id
-    );
+    const item =
+      items.find(
+        (i) =>
+          i.id ===
+          req.params.id
+      );
 
     if (!item) {
       return res.status(404).json({
-        error: "Item not found",
+        error:
+          "Item not found",
       });
     }
 
     const remaining =
       items.filter(
-        (i) => i.id !== req.params.id
+        (i) =>
+          i.id !==
+          req.params.id
       );
 
-    await db.items.save(remaining);
+    await db.items.save(
+      remaining
+    );
 
     res.json({
-      message: "Item deleted",
+      message:
+        "Item deleted",
     });
   }
 );
@@ -1562,13 +1905,15 @@ app.delete(
 
 const DEFAULT_CATEGORIES = [
   {
-    name: "Social Media Growth",
+    name:
+      "Social Media Growth",
     description:
       "Followers, likes, views and engagement boosts",
     icon: "Shield",
   },
   {
-    name: "Buy Account",
+    name:
+      "Buy Account",
     description:
       "Verified, ready-to-use social media accounts",
     icon: "Shield",
@@ -1587,18 +1932,24 @@ app.get(
     let categories =
       await db.categories.all();
 
-    if (categories.length === 0) {
+    if (
+      categories.length ===
+      0
+    ) {
       categories =
         DEFAULT_CATEGORIES.map(
           (c) => ({
-            id: crypto.randomUUID(),
+            id:
+              crypto.randomUUID(),
             ...c,
             createdAt:
               new Date().toISOString(),
           })
         );
 
-      await db.categories.save(categories);
+      await db.categories.save(
+        categories
+      );
     }
 
     res.json(categories);
@@ -1616,9 +1967,13 @@ app.post(
       icon,
     } = req.body;
 
-    if (!name || !name.trim()) {
+    if (
+      !name ||
+      !name.trim()
+    ) {
       return res.status(400).json({
-        error: "name is required",
+        error:
+          "name is required",
       });
     }
 
@@ -1626,19 +1981,33 @@ app.post(
       await db.categories.all();
 
     const newCategory = {
-      id: crypto.randomUUID(),
-      name: name.trim(),
-      description: description || "",
-      icon: icon || "Shield",
+      id:
+        crypto.randomUUID(),
+
+      name:
+        name.trim(),
+
+      description:
+        description || "",
+
+      icon:
+        icon || "Shield",
+
       createdAt:
         new Date().toISOString(),
     };
 
-    categories.push(newCategory);
+    categories.push(
+      newCategory
+    );
 
-    await db.categories.save(categories);
+    await db.categories.save(
+      categories
+    );
 
-    res.status(201).json(newCategory);
+    res.status(201).json(
+      newCategory
+    );
   }
 );
 
@@ -1652,12 +2021,15 @@ app.put(
 
     const category =
       categories.find(
-        (c) => c.id === req.params.id
+        (c) =>
+          c.id ===
+          req.params.id
       );
 
     if (!category) {
       return res.status(404).json({
-        error: "Category not found",
+        error:
+          "Category not found",
       });
     }
 
@@ -1667,16 +2039,28 @@ app.put(
       icon,
     } = req.body;
 
-    if (name !== undefined)
-      category.name = name;
+    if (
+      name !== undefined
+    )
+      category.name =
+        name;
 
-    if (description !== undefined)
-      category.description = description;
+    if (
+      description !==
+      undefined
+    )
+      category.description =
+        description;
 
-    if (icon !== undefined)
-      category.icon = icon;
+    if (
+      icon !== undefined
+    )
+      category.icon =
+        icon;
 
-    await db.categories.save(categories);
+    await db.categories.save(
+      categories
+    );
 
     res.json(category);
   }
@@ -1692,24 +2076,32 @@ app.delete(
 
     const category =
       categories.find(
-        (c) => c.id === req.params.id
+        (c) =>
+          c.id ===
+          req.params.id
       );
 
     if (!category) {
       return res.status(404).json({
-        error: "Category not found",
+        error:
+          "Category not found",
       });
     }
 
     const remaining =
       categories.filter(
-        (c) => c.id !== req.params.id
+        (c) =>
+          c.id !==
+          req.params.id
       );
 
-    await db.categories.save(remaining);
+    await db.categories.save(
+      remaining
+    );
 
     res.json({
-      message: "Category deleted",
+      message:
+        "Category deleted",
     });
   }
 );
@@ -1722,12 +2114,17 @@ app.post(
   "/api/wallet/deposit/instant/initialize",
   requireAuth,
   async (req, res) => {
-    const { amount } = req.body;
+    const {
+      amount,
+    } = req.body;
 
-    const amountNumber = Number(amount);
+    const amountNumber =
+      Number(amount);
 
     if (
-      !Number.isFinite(amountNumber) ||
+      !Number.isFinite(
+        amountNumber
+      ) ||
       amountNumber <= 0
     ) {
       return res.status(400).json({
@@ -1736,15 +2133,20 @@ app.post(
       });
     }
 
-    const users = await db.users.all();
+    const users =
+      await db.users.all();
 
-    const user = users.find(
-      (u) => u.id === req.user.id
-    );
+    const user =
+      users.find(
+        (u) =>
+          u.id ===
+          req.user.id
+      );
 
     if (!user) {
       return res.status(404).json({
-        error: "User not found",
+        error:
+          "User not found",
       });
     }
 
@@ -1753,33 +2155,55 @@ app.post(
 
     try {
       const paystackData =
-        await initializeTransaction({
-          email: user.email,
-          amountNaira: amountNumber,
-          reference,
-          callback_url:
-            process.env.PAYSTACK_CALLBACK_URL,
-        });
+        await initializeTransaction(
+          {
+            email:
+              user.email,
+
+            amountNaira:
+              amountNumber,
+
+            reference,
+
+            callback_url:
+              process.env
+                .PAYSTACK_CALLBACK_URL,
+          }
+        );
 
       const deposits =
         await db.deposits.all();
 
       deposits.push({
-        id: crypto.randomUUID(),
-        userId: user.id,
-        amount: amountNumber,
-        method: "instant",
-        status: "pending",
+        id:
+          crypto.randomUUID(),
+
+        userId:
+          user.id,
+
+        amount:
+          amountNumber,
+
+        method:
+          "instant",
+
+        status:
+          "pending",
+
         reference,
+
         createdAt:
           new Date().toISOString(),
       });
 
-      await db.deposits.save(deposits);
+      await db.deposits.save(
+        deposits
+      );
 
       res.status(201).json({
         authorizationUrl:
           paystackData.authorization_url,
+
         reference,
       });
     } catch (err) {
@@ -1811,27 +2235,37 @@ app.get(
           req.params.reference
         );
 
-      if (result.status === "success") {
+      if (
+        result.status ===
+        "success"
+      ) {
         await creditDepositByReference(
           req.params.reference,
           result.amount / 100
         );
       }
 
-      const users = await db.users.all();
+      const users =
+        await db.users.all();
 
-      const user = users.find(
-        (u) => u.id === req.user.id
-      );
+      const user =
+        users.find(
+          (u) =>
+            u.id ===
+            req.user.id
+        );
 
       if (!user) {
         return res.status(404).json({
-          error: "User not found",
+          error:
+            "User not found",
         });
       }
 
       res.json({
-        paymentStatus: result.status,
+        paymentStatus:
+          result.status,
+
         walletBalance:
           user.walletBalance,
       });
@@ -1857,13 +2291,19 @@ app.get(
 app.post(
   "/api/wallet/deposit/manual",
   requireAuth,
-  upload.single("screenshot"),
+  upload.single(
+    "screenshot"
+  ),
   async (req, res) => {
     const amount =
-      Number(req.body.amount);
+      Number(
+        req.body.amount
+      );
 
     if (
-      !Number.isFinite(amount) ||
+      !Number.isFinite(
+        amount
+      ) ||
       amount <= 0
     ) {
       return res.status(400).json({
@@ -1883,7 +2323,9 @@ app.post(
 
     try {
       screenshotUrl =
-        await uploadScreenshot(req.file);
+        await uploadScreenshot(
+          req.file
+        );
     } catch (err) {
       console.error(err);
 
@@ -1897,21 +2339,37 @@ app.post(
       await db.deposits.all();
 
     const deposit = {
-      id: crypto.randomUUID(),
-      userId: req.user.id,
+      id:
+        crypto.randomUUID(),
+
+      userId:
+        req.user.id,
+
       amount,
-      method: "manual",
-      status: "pending",
+
+      method:
+        "manual",
+
+      status:
+        "pending",
+
       screenshotUrl,
+
       createdAt:
         new Date().toISOString(),
     };
 
-    deposits.push(deposit);
+    deposits.push(
+      deposit
+    );
 
-    await db.deposits.save(deposits);
+    await db.deposits.save(
+      deposits
+    );
 
-    res.status(201).json(deposit);
+    res.status(201).json(
+      deposit
+    );
   }
 );
 
@@ -1927,7 +2385,9 @@ app.get(
       (
         await db.deposits.all()
       ).filter(
-        (d) => d.userId === req.user.id
+        (d) =>
+          d.userId ===
+          req.user.id
       );
 
     res.json(deposits);
@@ -1950,7 +2410,8 @@ app.get(
       deposits =
         deposits.filter(
           (d) =>
-            d.status === req.query.status
+            d.status ===
+            req.query.status
         );
     }
 
@@ -1972,47 +2433,67 @@ app.post(
 
     const deposit =
       deposits.find(
-        (d) => d.id === req.params.id
+        (d) =>
+          d.id ===
+          req.params.id
       );
 
     if (!deposit) {
       return res.status(404).json({
-        error: "Deposit not found",
+        error:
+          "Deposit not found",
       });
     }
 
-    if (deposit.status !== "pending") {
+    if (
+      deposit.status !==
+      "pending"
+    ) {
       return res.status(400).json({
         error:
           `Deposit already ${deposit.status}`,
       });
     }
 
-    deposit.status = "completed";
+    deposit.status =
+      "completed";
 
-    await db.deposits.save(deposits);
+    await db.deposits.save(
+      deposits
+    );
 
-    const users = await db.users.all();
+    const users =
+      await db.users.all();
 
     const user =
       users.find(
-        (u) => u.id === deposit.userId
+        (u) =>
+          u.id ===
+          deposit.userId
       );
 
     if (!user) {
       return res.status(404).json({
-        error: "User not found",
+        error:
+          "User not found",
       });
     }
 
     user.walletBalance =
-      Number(user.walletBalance || 0) +
-      Number(deposit.amount || 0);
+      Number(
+        user.walletBalance || 0
+      ) +
+      Number(
+        deposit.amount || 0
+      );
 
-    await db.users.save(users);
+    await db.users.save(
+      users
+    );
 
     res.json({
       deposit,
+
       newBalance:
         user.walletBalance,
     });
@@ -2033,27 +2514,38 @@ app.post(
 
     const deposit =
       deposits.find(
-        (d) => d.id === req.params.id
+        (d) =>
+          d.id ===
+          req.params.id
       );
 
     if (!deposit) {
       return res.status(404).json({
-        error: "Deposit not found",
+        error:
+          "Deposit not found",
       });
     }
 
-    if (deposit.status !== "pending") {
+    if (
+      deposit.status !==
+      "pending"
+    ) {
       return res.status(400).json({
         error:
           `Deposit already ${deposit.status}`,
       });
     }
 
-    deposit.status = "rejected";
+    deposit.status =
+      "rejected";
 
-    await db.deposits.save(deposits);
+    await db.deposits.save(
+      deposits
+    );
 
-    res.json({ deposit });
+    res.json({
+      deposit,
+    });
   }
 );
 
@@ -2073,7 +2565,8 @@ app.post(
 
       if (!itemId) {
         return res.status(400).json({
-          error: "itemId is required",
+          error:
+            "itemId is required",
         });
       }
 
@@ -2083,7 +2576,9 @@ app.post(
           : 1;
 
       if (
-        !Number.isInteger(qtyToBuy) ||
+        !Number.isInteger(
+          qtyToBuy
+        ) ||
         qtyToBuy < 1
       ) {
         return res.status(400).json({
@@ -2092,15 +2587,20 @@ app.post(
         });
       }
 
-      const items = await db.items.all();
+      const items =
+        await db.items.all();
 
-      const item = items.find(
-        (i) => i.id === itemId
-      );
+      const item =
+        items.find(
+          (i) =>
+            i.id ===
+            itemId
+        );
 
       if (!item) {
         return res.status(404).json({
-          error: "Item not found",
+          error:
+            "Item not found",
         });
       }
 
@@ -2108,24 +2608,35 @@ app.post(
       // TONYIX PRODUCT PURCHASE
       // ============================================================
 
-      if (item.tonyixProductId) {
-        const users = await db.users.all();
+      if (
+        item.tonyixProductId
+      ) {
+        const users =
+          await db.users.all();
 
-        const user = users.find(
-          (u) => u.id === req.user.id
-        );
+        const user =
+          users.find(
+            (u) =>
+              u.id ===
+              req.user.id
+          );
 
         if (!user) {
           return res.status(404).json({
-            error: "User not found",
+            error:
+              "User not found",
           });
         }
 
         const totalPrice =
-          Number(item.price) * qtyToBuy;
+          Number(item.price) *
+          qtyToBuy;
 
         if (
-          Number(user.walletBalance || 0) <
+          Number(
+            user.walletBalance ||
+              0
+          ) <
           totalPrice
         ) {
           return res.status(400).json({
@@ -2134,7 +2645,6 @@ app.post(
           });
         }
 
-        // Ask Tonyix to fulfil the order first.
         const tonyixResult =
           await tonyixPurchase(
             item.tonyixProductId,
@@ -2143,7 +2653,8 @@ app.post(
 
         if (
           !tonyixResult ||
-          tonyixResult.success === false
+          tonyixResult.success ===
+            false
         ) {
           return res.status(502).json({
             error:
@@ -2153,9 +2664,11 @@ app.post(
           });
         }
 
-        // Tonyix succeeded, so charge the DeeDee wallet.
         user.walletBalance =
-          Number(user.walletBalance || 0) -
+          Number(
+            user.walletBalance ||
+              0
+          ) -
           totalPrice;
 
         if (
@@ -2163,7 +2676,8 @@ app.post(
             user.purchasedItemIds
           )
         ) {
-          user.purchasedItemIds = [];
+          user.purchasedItemIds =
+            [];
         }
 
         if (
@@ -2180,21 +2694,27 @@ app.post(
           await db.purchases.all();
 
         const tonyixOrderId =
-          tonyixResult?.data?.order_id ||
+          tonyixResult
+            ?.data
+            ?.order_id ||
           null;
 
         const deliveredItems =
           Array.isArray(
-            tonyixResult?.data?.items
+            tonyixResult
+              ?.data
+              ?.items
           )
             ? tonyixResult.data.items.map(
                 (product) => ({
                   productName:
                     product.product_name ||
                     null,
+
                   details:
                     product.details ||
                     null,
+
                   url:
                     product.url ||
                     null,
@@ -2203,21 +2723,40 @@ app.post(
             : [];
 
         purchases.push({
-          id: crypto.randomUUID(),
-          itemId: item.id,
-          buyerId: user.id,
-          buyerName: user.name,
-          buyerEmail: user.email,
-          price: totalPrice,
-          quantity: qtyToBuy,
+          id:
+            crypto.randomUUID(),
+
+          itemId:
+            item.id,
+
+          buyerId:
+            user.id,
+
+          buyerName:
+            user.name,
+
+          buyerEmail:
+            user.email,
+
+          price:
+            totalPrice,
+
+          quantity:
+            qtyToBuy,
+
           tonyixOrderId,
+
           assignedCredentials:
             deliveredItems,
+
           createdAt:
             new Date().toISOString(),
         });
 
-        await db.users.save(users);
+        await db.users.save(
+          users
+        );
+
         await db.purchases.save(
           purchases
         );
@@ -2225,15 +2764,19 @@ app.post(
         return res.json({
           message:
             "Purchase successful",
+
           orderId:
             tonyixOrderId,
+
           item: {
             ...publicItem(item),
             assignedCredentials:
               deliveredItems,
           },
+
           newBalance:
             user.walletBalance,
+
           tonyix:
             tonyixResult,
         });
@@ -2243,7 +2786,9 @@ app.post(
       // NORMAL DEEDEE PRODUCT PURCHASE
       // ============================================================
 
-      if (item.inStock === false) {
+      if (
+        item.inStock === false
+      ) {
         return res.status(400).json({
           error:
             "This item is currently out of stock",
@@ -2254,7 +2799,8 @@ app.post(
         stockCountOf(item);
 
       if (
-        availableQty < qtyToBuy
+        availableQty <
+        qtyToBuy
       ) {
         return res.status(400).json({
           error:
@@ -2262,25 +2808,35 @@ app.post(
         });
       }
 
-      const users = await db.users.all();
+      const users =
+        await db.users.all();
 
-      const user = users.find(
-        (u) => u.id === req.user.id
-      );
+      const user =
+        users.find(
+          (u) =>
+            u.id ===
+            req.user.id
+        );
 
       if (!user) {
         return res.status(404).json({
-          error: "User not found",
+          error:
+            "User not found",
         });
       }
 
       const purchases =
         await db.purchases.all();
 
+      // ============================================================
+      // REFERRAL ELIGIBILITY
+      // ============================================================
+
       const isFirstPurchase =
         !purchases.some(
           (p) =>
-            p.buyerId === user.id
+            p.buyerId ===
+            user.id
         );
 
       const eligibleForReferralDiscount =
@@ -2294,12 +2850,17 @@ app.post(
 
       let discountApplied = 0;
 
+      // ============================================================
+      // 5% FIRST PURCHASE REFERRAL DISCOUNT
+      // ============================================================
+
       if (
         eligibleForReferralDiscount
       ) {
         discountApplied =
           Math.round(
-            totalPrice * 0.05
+            totalPrice *
+              0.05
           );
 
         totalPrice -=
@@ -2308,8 +2869,10 @@ app.post(
 
       if (
         Number(
-          user.walletBalance || 0
-        ) < totalPrice
+          user.walletBalance ||
+            0
+        ) <
+        totalPrice
       ) {
         return res.status(400).json({
           error:
@@ -2319,15 +2882,18 @@ app.post(
 
       user.walletBalance =
         Number(
-          user.walletBalance || 0
-        ) - totalPrice;
+          user.walletBalance ||
+            0
+        ) -
+        totalPrice;
 
       if (
         !Array.isArray(
           user.purchasedItemIds
         )
       ) {
-        user.purchasedItemIds = [];
+        user.purchasedItemIds =
+          [];
       }
 
       if (
@@ -2340,13 +2906,15 @@ app.post(
         );
       }
 
-      let assignedCredentials = [];
+      let assignedCredentials =
+        [];
 
       if (
         Array.isArray(
           item.accessLinks
         ) &&
-        item.accessLinks.length > 0
+        item.accessLinks
+          .length > 0
       ) {
         assignedCredentials =
           item.accessLinks.splice(
@@ -2362,13 +2930,19 @@ app.post(
         item.quantity =
           Math.max(
             0,
-            Number(item.quantity) -
+            Number(
+              item.quantity
+            ) -
               qtyToBuy
           );
 
-        if (item.accessLink) {
+        if (
+          item.accessLink
+        ) {
           assignedCredentials =
-            Array(qtyToBuy).fill(
+            Array(
+              qtyToBuy
+            ).fill(
               item.accessLink
             );
         }
@@ -2376,19 +2950,27 @@ app.post(
         item.sold = true;
       }
 
+      // ============================================================
+      // REFERRAL REWARD
+      // ============================================================
+
       if (
         eligibleForReferralDiscount
       ) {
         const referrer =
           users.find(
             (u) =>
-              u.id === user.referredBy
+              u.id ===
+              user.referredBy
           );
 
         if (referrer) {
+          // Prevent this referral reward
+          // from ever being processed twice.
           user.referralRewardProcessed =
             true;
 
+          // Give the referrer ₦500.
           referrer.walletBalance =
             Number(
               referrer.walletBalance ||
@@ -2397,21 +2979,42 @@ app.post(
         }
       }
 
-      await db.users.save(users);
-      await db.items.save(items);
+      await db.users.save(
+        users
+      );
+
+      await db.items.save(
+        items
+      );
 
       purchases.push({
-        id: crypto.randomUUID(),
-        itemId: item.id,
-        buyerId: user.id,
-        buyerName: user.name,
-        buyerEmail: user.email,
-        price: totalPrice,
-        quantity: qtyToBuy,
+        id:
+          crypto.randomUUID(),
+
+        itemId:
+          item.id,
+
+        buyerId:
+          user.id,
+
+        buyerName:
+          user.name,
+
+        buyerEmail:
+          user.email,
+
+        price:
+          totalPrice,
+
+        quantity:
+          qtyToBuy,
+
         assignedCredentials,
+
         referralDiscountApplied:
           discountApplied ||
           undefined,
+
         createdAt:
           new Date().toISOString(),
       });
@@ -2423,15 +3026,20 @@ app.post(
       return res.json({
         message:
           "Purchase successful",
+
         item: {
           ...publicItem(item),
+
           assignedCredentials,
+
           accessLink:
             assignedCredentials[0] ||
             null,
         },
+
         newBalance:
           user.walletBalance,
+
         discountApplied,
       });
     } catch (error) {
@@ -2448,6 +3056,7 @@ app.post(
     }
   }
 );
+
 // ============================================================
 // ADMIN SALES
 // ============================================================
@@ -2460,34 +3069,47 @@ app.get(
     const [
       purchases,
       items,
-    ] = await Promise.all([
-      db.purchases.all(),
-      db.items.all(),
-    ]);
+    ] =
+      await Promise.all([
+        db.purchases.all(),
+        db.items.all(),
+      ]);
 
     const sales =
-      purchases.map((p) => {
-        const item =
-          items.find(
-            (i) => i.id === p.itemId
-          );
+      purchases.map(
+        (p) => {
+          const item =
+            items.find(
+              (i) =>
+                i.id ===
+                p.itemId
+            );
 
-        return {
-          ...(item
-            ? publicItem(item)
-            : {}),
-          id: p.id,
-          price: p.price,
-          quantity:
-            p.quantity || 1,
-          buyerName:
-            p.buyerName,
-          buyerEmail:
-            p.buyerEmail,
-          createdAt:
-            p.createdAt,
-        };
-      });
+          return {
+            ...(item
+              ? publicItem(item)
+              : {}),
+
+            id:
+              p.id,
+
+            price:
+              p.price,
+
+            quantity:
+              p.quantity || 1,
+
+            buyerName:
+              p.buyerName,
+
+            buyerEmail:
+              p.buyerEmail,
+
+            createdAt:
+              p.createdAt,
+          };
+        }
+      );
 
     res.json(sales);
   }
@@ -2523,22 +3145,37 @@ app.post(
       await db.tickets.all();
 
     const newTicket = {
-      id: crypto.randomUUID(),
+      id:
+        crypto.randomUUID(),
+
       name,
+
       email,
+
       subject,
+
       message,
-      status: "open",
+
+      status:
+        "open",
+
       replies: [],
+
       createdAt:
         new Date().toISOString(),
     };
 
-    tickets.push(newTicket);
+    tickets.push(
+      newTicket
+    );
 
-    await db.tickets.save(tickets);
+    await db.tickets.save(
+      tickets
+    );
 
-    res.status(201).json(newTicket);
+    res.status(201).json(
+      newTicket
+    );
   }
 );
 
@@ -2556,8 +3193,12 @@ app.get(
 
     tickets.sort(
       (a, b) =>
-        new Date(b.createdAt) -
-        new Date(a.createdAt)
+        new Date(
+          b.createdAt
+        ) -
+        new Date(
+          a.createdAt
+        )
     );
 
     res.json(tickets);
@@ -2569,11 +3210,17 @@ app.post(
   requireAuth,
   requireAdmin,
   async (req, res) => {
-    const { message } = req.body;
+    const {
+      message,
+    } = req.body;
 
-    if (!message || !message.trim()) {
+    if (
+      !message ||
+      !message.trim()
+    ) {
       return res.status(400).json({
-        error: "message is required",
+        error:
+          "message is required",
       });
     }
 
@@ -2582,26 +3229,38 @@ app.post(
 
     const ticket =
       tickets.find(
-        (t) => t.id === req.params.id
+        (t) =>
+          t.id ===
+          req.params.id
       );
 
     if (!ticket) {
       return res.status(404).json({
-        error: "Ticket not found",
+        error:
+          "Ticket not found",
       });
     }
 
-    if (!Array.isArray(ticket.replies)) {
-      ticket.replies = [];
+    if (
+      !Array.isArray(
+        ticket.replies
+      )
+    ) {
+      ticket.replies =
+        [];
     }
 
     ticket.replies.push({
-      message: message.trim(),
+      message:
+        message.trim(),
+
       createdAt:
         new Date().toISOString(),
     });
 
-    await db.tickets.save(tickets);
+    await db.tickets.save(
+      tickets
+    );
 
     res.json(ticket);
   }
@@ -2612,10 +3271,15 @@ app.post(
   requireAuth,
   requireAdmin,
   async (req, res) => {
-    const { status } = req.body;
+    const {
+      status,
+    } = req.body;
 
     if (
-      !["open", "resolved"].includes(status)
+      ![
+        "open",
+        "resolved",
+      ].includes(status)
     ) {
       return res.status(400).json({
         error:
@@ -2628,18 +3292,24 @@ app.post(
 
     const ticket =
       tickets.find(
-        (t) => t.id === req.params.id
+        (t) =>
+          t.id ===
+          req.params.id
       );
 
     if (!ticket) {
       return res.status(404).json({
-        error: "Ticket not found",
+        error:
+          "Ticket not found",
       });
     }
 
-    ticket.status = status;
+    ticket.status =
+      status;
 
-    await db.tickets.save(tickets);
+    await db.tickets.save(
+      tickets
+    );
 
     res.json(ticket);
   }
@@ -2650,13 +3320,14 @@ app.post(
 // ============================================================
 
 const PORT =
-  process.env.PORT || 3001;
+  process.env.PORT ||
+  3001;
 
 async function startServer() {
   try {
     await initDatabase();
 
-    // Sync Tonyix products when the backend starts.
+    // Sync Tonyix products when backend starts.
     await syncTonyixProducts();
 
     // Refresh Tonyix products every 15 minutes.
@@ -2665,11 +3336,14 @@ async function startServer() {
       15 * 60 * 1000
     );
 
-    app.listen(PORT, () => {
-      console.log(
-        `Server running on http://localhost:${PORT}`
-      );
-    });
+    app.listen(
+      PORT,
+      () => {
+        console.log(
+          `Server running on http://localhost:${PORT}`
+        );
+      }
+    );
   } catch (error) {
     console.error(
       "Failed to initialize database:",
