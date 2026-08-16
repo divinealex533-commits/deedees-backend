@@ -1155,6 +1155,131 @@ async function getCurrentSellerUser(
   return user;
 }
 
+// ============================================================
+// SELLER SUBSCRIPTION — RENEWAL / FREEZE HELPERS
+// ============================================================
+
+const SELLER_RENEWAL_REMINDER_DAYS = 14;
+
+function sellerSubscriptionNeedsRenewalReminder(user) {
+  if (!user) {
+    return false;
+  }
+
+  const plan = getSellerPlan(user);
+
+  if (!plan) {
+    return false;
+  }
+
+  // Standard Seller does not use the subscription-expiry system.
+  if (plan.id === "standard_seller") {
+    return false;
+  }
+
+  if (
+    plan.id !== "premium_monthly" &&
+    plan.id !== "premium_yearly"
+  ) {
+    return false;
+  }
+
+  if (
+    user.sellerPlanStatus !== "active"
+  ) {
+    return false;
+  }
+
+  const expiresAt =
+    Number(
+      user.sellerPlanExpiresAt || 0
+    );
+
+  if (!expiresAt) {
+    return false;
+  }
+
+  const now = Date.now();
+
+  const reminderWindow =
+    SELLER_RENEWAL_REMINDER_DAYS *
+    24 *
+    60 *
+    60 *
+    1000;
+
+  const reminderStart =
+    expiresAt - reminderWindow;
+
+  return (
+    now >= reminderStart &&
+    now < expiresAt &&
+    !user.sellerRenewalReminderSentAt
+  );
+}
+
+function freezeExpiredSeller(user) {
+  if (!user) {
+    return false;
+  }
+
+  const plan = getSellerPlan(user);
+
+  if (!plan) {
+    return false;
+  }
+
+  if (
+    plan.id !== "premium_monthly" &&
+    plan.id !== "premium_yearly"
+  ) {
+    return false;
+  }
+
+  const expiresAt =
+    Number(
+      user.sellerPlanExpiresAt || 0
+    );
+
+  if (
+    user.sellerPlanStatus !== "active" ||
+    !expiresAt ||
+    Date.now() < expiresAt
+  ) {
+    return false;
+  }
+
+  user.sellerPlanStatus =
+    "frozen";
+
+  user.sellerFrozenAt =
+    new Date().toISOString();
+
+  user.sellerFreezeReason =
+    "Subscription expired and was not renewed";
+
+  return true;
+}
+
+function isSellerFrozen(user) {
+  return (
+    user?.sellerPlanStatus ===
+    "frozen"
+  );
+}
+
+function canSellerUsePlatform(user) {
+  if (!user) {
+    return false;
+  }
+
+  if (isSellerFrozen(user)) {
+    return false;
+  }
+
+  return hasSellerAccess(user);
+}
+
 // Seller must have an active Standard or Premium plan.
 async function requireSellerAccess(
   req,
