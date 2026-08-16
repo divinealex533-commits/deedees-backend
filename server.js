@@ -558,7 +558,20 @@ function generateReferralCode() {
     .toString("hex")
     .toUpperCase();
 }
-
+function createSellerProfile() {
+  return {
+    isSeller: false,
+    sellerStoreName: "",
+    sellerStoreSlug: "",
+    sellerDescription: "",
+    sellerLogoUrl: "",
+    sellerMarkup: 0,
+    sellerPayoutEmail: "",
+    sellerPayoutAccountName: "",
+    sellerPayoutAccountNumber: "",
+    sellerPayoutBankCode: "",
+  };
+}
 // ============================================================
 // ADMIN EMAIL SYNC
 // ============================================================
@@ -855,39 +868,45 @@ app.post(
         .trim()
         .toLowerCase();
 
-    const newUser = {
-      id:
-        crypto.randomUUID(),
+ const newUser = {
+  id:
+    crypto.randomUUID(),
 
-      name:
-        name.trim(),
+  name:
+    name.trim(),
 
-      email:
-        normalizedEmail,
+  // ============================================================
+  // SELLER FOUNDATION
+  // ============================================================
 
-      passwordHash:
-        hashPassword(password),
+  ...createSellerProfile(),
 
-      walletBalance: 0,
+  email:
+    normalizedEmail,
 
-      isAdmin:
-        adminEmail !== "" &&
-        normalizedEmail ===
-          adminEmail,
+  passwordHash:
+    hashPassword(password),
 
-      purchasedItemIds: [],
+  walletBalance: 0,
 
-      referralCode:
-        generateReferralCode(),
+  isAdmin:
+    adminEmail !== "" &&
+    normalizedEmail ===
+      adminEmail,
 
-      referredBy,
+  purchasedItemIds: [],
 
-      referralRewardProcessed:
-        false,
+  referralCode:
+    generateReferralCode(),
 
-      createdAt:
-        new Date().toISOString(),
-    };
+  referredBy,
+
+  referralRewardProcessed:
+    false,
+
+  createdAt:
+    new Date().toISOString(),
+};
 
     users.push(newUser);
 
@@ -1442,6 +1461,284 @@ app.get(
       successfulReferrals,
       totalEarned:
         successfulReferrals * 500,
+    });
+  }
+);
+
+// ============================================================
+// SELLER FOUNDATION
+// ============================================================
+
+// Get the current user's seller profile.
+app.get(
+  "/api/seller/profile",
+  requireAuth,
+  async (req, res) => {
+    const users =
+      await db.users.all();
+
+    const user =
+      users.find(
+        (u) =>
+          u.id === req.user.id
+      );
+
+    if (!user) {
+      return res.status(404).json({
+        error:
+          "User not found",
+      });
+    }
+
+    // Give older accounts the new seller fields.
+    let changed = false;
+
+    if (user.isSeller === undefined) {
+      user.isSeller = false;
+      changed = true;
+    }
+
+    if (user.sellerStoreName === undefined) {
+      user.sellerStoreName = "";
+      changed = true;
+    }
+
+    if (user.sellerStoreSlug === undefined) {
+      user.sellerStoreSlug = "";
+      changed = true;
+    }
+
+    if (user.sellerDescription === undefined) {
+      user.sellerDescription = "";
+      changed = true;
+    }
+
+    if (user.sellerLogoUrl === undefined) {
+      user.sellerLogoUrl = "";
+      changed = true;
+    }
+
+    if (user.sellerMarkup === undefined) {
+      user.sellerMarkup = 0;
+      changed = true;
+    }
+
+    if (user.sellerPayoutEmail === undefined) {
+      user.sellerPayoutEmail = "";
+      changed = true;
+    }
+
+    if (user.sellerPayoutAccountName === undefined) {
+      user.sellerPayoutAccountName = "";
+      changed = true;
+    }
+
+    if (user.sellerPayoutAccountNumber === undefined) {
+      user.sellerPayoutAccountNumber = "";
+      changed = true;
+    }
+
+    if (user.sellerPayoutBankCode === undefined) {
+      user.sellerPayoutBankCode = "";
+      changed = true;
+    }
+
+    if (changed) {
+      await db.users.save(users);
+    }
+
+    res.json({
+      isSeller:
+        !!user.isSeller,
+
+      storeName:
+        user.sellerStoreName || "",
+
+      storeSlug:
+        user.sellerStoreSlug || "",
+
+      description:
+        user.sellerDescription || "",
+
+      logoUrl:
+        user.sellerLogoUrl || "",
+
+      markup:
+        Number(
+          user.sellerMarkup || 0
+        ),
+
+      payoutEmail:
+        user.sellerPayoutEmail || "",
+
+      payoutAccountName:
+        user.sellerPayoutAccountName || "",
+
+      payoutAccountNumber:
+        user.sellerPayoutAccountNumber || "",
+
+      payoutBankCode:
+        user.sellerPayoutBankCode || "",
+    });
+  }
+);
+
+// Create/update seller profile.
+app.put(
+  "/api/seller/profile",
+  requireAuth,
+  async (req, res) => {
+    const {
+      storeName,
+      storeSlug,
+      description,
+      logoUrl,
+      markup,
+      payoutEmail,
+      payoutAccountName,
+      payoutAccountNumber,
+      payoutBankCode,
+    } = req.body;
+
+    const users =
+      await db.users.all();
+
+    const user =
+      users.find(
+        (u) =>
+          u.id === req.user.id
+      );
+
+    if (!user) {
+      return res.status(404).json({
+        error:
+          "User not found",
+      });
+    }
+
+    if (
+      !storeName ||
+      !String(storeName).trim()
+    ) {
+      return res.status(400).json({
+        error:
+          "Store name is required",
+      });
+    }
+
+    const markupNumber =
+      markup == null
+        ? 0
+        : Number(markup);
+
+    if (
+      !Number.isFinite(
+        markupNumber
+      ) ||
+      markupNumber < 0
+    ) {
+      return res.status(400).json({
+        error:
+          "Markup must be a valid number greater than or equal to 0",
+      });
+    }
+
+    user.isSeller = true;
+
+    user.sellerStoreName =
+      String(storeName).trim();
+
+    user.sellerStoreSlug =
+      String(
+        storeSlug ||
+          storeName
+      )
+        .trim()
+        .toLowerCase()
+        .replace(
+          /[^a-z0-9]+/g,
+          "-"
+        )
+        .replace(
+          /^-+|-+$/g,
+          ""
+        );
+
+    user.sellerDescription =
+      String(
+        description || ""
+      ).trim();
+
+    user.sellerLogoUrl =
+      String(
+        logoUrl || ""
+      ).trim();
+
+    user.sellerMarkup =
+      markupNumber;
+
+    user.sellerPayoutEmail =
+      String(
+        payoutEmail ||
+          user.email ||
+          ""
+      ).trim();
+
+    user.sellerPayoutAccountName =
+      String(
+        payoutAccountName ||
+          ""
+      ).trim();
+
+    user.sellerPayoutAccountNumber =
+      String(
+        payoutAccountNumber ||
+          ""
+      ).trim();
+
+    user.sellerPayoutBankCode =
+      String(
+        payoutBankCode ||
+          ""
+      ).trim();
+
+    await db.users.save(users);
+
+    res.json({
+      message:
+        "Seller profile saved successfully",
+
+      seller: {
+        isSeller:
+          user.isSeller,
+
+        storeName:
+          user.sellerStoreName,
+
+        storeSlug:
+          user.sellerStoreSlug,
+
+        description:
+          user.sellerDescription,
+
+        logoUrl:
+          user.sellerLogoUrl,
+
+        markup:
+          user.sellerMarkup,
+
+        payoutEmail:
+          user.sellerPayoutEmail,
+
+        payoutAccountName:
+          user.sellerPayoutAccountName,
+
+        payoutAccountNumber:
+          user.sellerPayoutAccountNumber,
+
+        payoutBankCode:
+          user.sellerPayoutBankCode,
+      },
     });
   }
 );
