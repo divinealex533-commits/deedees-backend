@@ -9,6 +9,10 @@ import crypto from "crypto";
 // TONYIX API
 // ============================================================
 
+// ============================================================
+// TONYIX API
+// ============================================================
+
 const TONYIX_BASE_URL = "https://tonyixlog.com/v1";
 const TONYIX_MARKUP = 0.70;
 
@@ -19,19 +23,19 @@ async function tonyixRequest(endpoint, options = {}) {
     throw new Error("TONYIX_API_KEY is not configured");
   }
 
-  const url =
-    `${TONYIX_BASE_URL}${endpoint}` +
-    `${endpoint.includes("?") ? "&" : "?"}` +
-    `api_key=${encodeURIComponent(apiKey)}`;
+  const separator = endpoint.includes("?") ? "&" : "?";
 
-  const response = await fetch(url, {
-    ...options,
-    headers: {
-      Accept: "application/json",
-      "Content-Type": "application/json",
-      ...(options.headers || {}),
-    },
-  });
+  const response = await fetch(
+    `${TONYIX_BASE_URL}${endpoint}${separator}api_key=${encodeURIComponent(apiKey)}`,
+    {
+      ...options,
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        ...(options.headers || {}),
+      },
+    }
+  );
 
   let data;
 
@@ -46,20 +50,16 @@ async function tonyixRequest(endpoint, options = {}) {
   if (!response.ok || data.success === false) {
     throw new Error(
       data.message ||
-      data.msg ||
-      `Tonyix request failed (${response.status})`
+        data.msg ||
+        `Tonyix request failed (${response.status})`
     );
   }
 
   return data;
 }
 
-// ============================================================
-// TONYIX PURCHASE
-// ============================================================
-
 async function tonyixPurchase(productId, quantity) {
-  return await tonyixRequest("/purchase", {
+  return tonyixRequest("/purchase", {
     method: "POST",
     body: JSON.stringify({
       product: Number(productId),
@@ -276,6 +276,191 @@ function publicItem(item) {
       item.inStock !== false &&
       stockCount > 0,
   };
+}
+
+// ============================================================
+// TONYIX → DEEDEE AUTOMATIC PRODUCT SYNC
+// ============================================================
+
+function getTonyixProductsPayload(result) {
+  if (Array.isArray(result)) return result;
+
+  if (Array.isArray(result.products)) {
+    return result.products;
+  }
+
+  if (Array.isArray(result.data)) {
+    return result.data;
+  }
+
+  if (Array.isArray(result.data?.products)) {
+    return result.data.products;
+  }
+
+  return [];
+}
+
+function getTonyixProductId(product) {
+  return (
+    product.id ??
+    product.product_id ??
+    product.productId ??
+    product.product ??
+    null
+  );
+}
+
+function getTonyixProductName(product) {
+  return (
+    product.name ??
+    product.product_name ??
+    product.productName ??
+    `Tonyix Product ${getTonyixProductId(product)}`
+  );
+}
+
+function getTonyixProductPrice(product) {
+  const value =
+    product.price ??
+    product.product_price ??
+    product.productPrice ??
+    product.cost ??
+    product.amount ??
+    product.selling_price;
+
+  const number = Number(value);
+
+  return Number.isFinite(number) ? number : null;
+}
+
+async function syncTonyixProducts() {
+  try {
+    const result = await tonyixRequest("/products");
+
+    const products = getTonyixProductsPayload(result);
+
+    if (!products.length) {
+      console.log("Tonyix sync: no products returned.");
+      return;
+    }
+
+    const items = await db.items.all();
+
+    let created = 0;
+    let updated = 0;
+
+    for (const product of products) {
+      const tonyixProductId =
+        getTonyixProductId(product);
+
+      const supplierPrice =
+        getTonyixProductPrice(product);
+
+      if (
+        tonyixProductId == null ||
+        supplierPrice == null
+      ) {
+        continue;
+      }
+
+      const deeDeePrice =
+        Math.round(
+          supplierPrice * (1 + TONYIX_MARKUP)
+        );
+
+      let item = items.find(
+        (existing) =>
+          Number(existing.tonyixProductId) ===
+          Number(tonyixProductId)
+      );
+
+      if (!item) {
+        item = {
+          id: crypto.randomUUID(),
+
+          name:
+            getTonyixProductName(product),
+
+          description:
+            product.description ||
+            "",
+
+          price:
+            deeDeePrice,
+
+          tonyixProductId:
+            Number(tonyixProductId),
+
+          tonyixSupplierPrice:
+            supplierPrice,
+
+          imageUrl:
+            product.image ||
+            product.image_url ||
+            product.imageUrl ||
+            "",
+
+          categoryId:
+            null,
+
+          accessLinks:
+            [],
+
+          quantity:
+            null,
+
+          inStock:
+            true,
+
+          createdAt:
+            new Date().toISOString(),
+        };
+
+        items.push(item);
+        created++;
+      } else {
+        item.name =
+          getTonyixProductName(product);
+
+        item.tonyixSupplierPrice =
+          supplierPrice;
+
+        item.price =
+          deeDeePrice;
+
+        if (
+          product.description !== undefined
+        ) {
+          item.description =
+            product.description || "";
+        }
+
+        if (
+          product.image ||
+          product.image_url ||
+          product.imageUrl
+        ) {
+          item.imageUrl =
+            product.image ||
+            product.image_url ||
+            product.imageUrl;
+        }
+
+        updated++;
+      }
+    }
+
+    await db.items.save(items);
+
+    console.log(
+      `Tonyix sync complete: ${created} created, ${updated} updated.`
+    );
+  } catch (error) {
+    console.error(
+      "Tonyix automatic sync failed:",
+      error.message
+    );
+  }
 }
 
 // ============================================================
@@ -2467,10 +2652,18 @@ app.post(
 const PORT =
   process.env.PORT || 3001;
 
-async function startServer() {
-  try {
-    await initDatabase();
+await initDatabase();
 
+// Sync Tonyix products when the backend starts.
+await syncTonyixProducts();
+
+// Then refresh Tonyix products every 15 minutes.
+setInterval(
+  syncTonyixProducts,
+  15 * 60 * 1000
+);
+
+app.listen(PORT, () => {
     app.listen(PORT, () => {
       console.log(
         `Server running on http://localhost:${PORT}`
