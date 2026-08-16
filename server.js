@@ -292,25 +292,6 @@ function stockCountOf(item) {
   return item.sold ? 0 : 1;
 }
 
-function publicItem(item) {
-  const {
-    accessLinks,
-    accessLink,
-    ...safe
-  } = item;
-
-  const stockCount =
-    stockCountOf(item);
-
-  return {
-    ...safe,
-    stockCount,
-    inStock:
-      item.inStock !== false &&
-      stockCount > 0,
-  };
-}
-
 // ============================================================
 // TONYIX PRODUCT SYNC
 // ============================================================
