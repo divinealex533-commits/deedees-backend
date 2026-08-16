@@ -1323,6 +1323,85 @@ async function sendSellerRenewalReminder(user) {
   if (!currentUser) {
     return false;
   }
+  // ============================================================
+// SELLER SUBSCRIPTION — AUTOMATIC CHECKER
+// ============================================================
+let sellerSubscriptionCheckRunning = false;
+async function runSellerSubscriptionCheck() {
+  if (sellerSubscriptionCheckRunning) {
+    return;
+  }
+  sellerSubscriptionCheckRunning = true;
+  try {
+    const users = await db.users.all();
+    let changed = false;
+    for (const user of users) {
+      if (!user) {
+        continue;
+      }
+      const plan = getSellerPlan(user);
+      if (!plan) {
+        continue;
+      }
+      // Standard Seller does not use Premium subscription expiry.
+      if (plan.id === "standard_seller") {
+        continue;
+      }
+      if (
+        plan.id !== "premium_monthly" &&
+        plan.id !== "premium_yearly"
+      ) {
+        continue;
+      }
+      // First synchronize an already-expired subscription.
+      if (
+        syncSellerSubscription(user)
+      ) {
+        changed = true;
+      }
+      // Send the 14-day renewal reminder.
+      if (
+        sellerSubscriptionNeedsRenewalReminder(
+          user
+        )
+      ) {
+        await sendSellerRenewalReminder(
+          user
+        );
+        changed = true;
+      }
+      // Freeze the seller after expiry if
+      // the subscription was not renewed.
+      if (
+        freezeExpiredSeller(user)
+      ) {
+        changed = true;
+        console.log(
+          "Seller subscription frozen:",
+          user.id
+        );
+      }
+    }
+    if (changed) {
+      await db.users.save(users);
+    }
+  } catch (err) {
+    console.error(
+      "Seller subscription check failed:",
+      err
+    );
+  } finally {
+    sellerSubscriptionCheckRunning = false;
+  }
+}
+// Run once when the server starts.
+runSellerSubscriptionCheck();
+// Then check every hour.
+setInterval(
+  runSellerSubscriptionCheck,
+  60 * 60 * 1000
+);
+  
   // Double-check so repeated calls cannot send
   // the same reminder again.
   if (
