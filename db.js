@@ -113,12 +113,6 @@ async function writeTable(name, rows) {
   }
 }
 
-/*
- * FAST USER LOOKUP
- *
- * Login no longer needs to load the entire users table.
- * PostgreSQL finds the matching email directly.
- */
 async function findUserByEmail(email) {
   const result = await pool.query(
     `
@@ -133,12 +127,6 @@ async function findUserByEmail(email) {
   return result.rows[0]?.data || null;
 }
 
-/*
- * FAST USER UPDATE
- *
- * Updates only the matching user instead of deleting
- * and reinserting the entire users table.
- */
 async function updateUserById(userId, user) {
   await pool.query(
     `
@@ -150,15 +138,123 @@ async function updateUserById(userId, user) {
   );
 }
 
+/*
+ * Atomically process a referral reward.
+ *
+ * This prevents the same referred user from triggering
+ * the ₦500 reward more than once.
+ */
+async function processReferralReward(userId) {
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    const userResult = await client.query(
+      `
+        SELECT data
+        FROM users
+        WHERE data->>'id' = $1
+        FOR UPDATE
+      `,
+      [String(userId)]
+    );
+
+    const user = userResult.rows[0]?.data;
+
+    if (!user) {
+      await client.query("ROLLBACK");
+      return {
+        rewarded: false,
+        reason: "user_not_found",
+      };
+    }
+
+    if (
+      !user.referredBy ||
+      user.referralRewardProcessed
+    ) {
+      await client.query("COMMIT");
+
+      return {
+        rewarded: false,
+        reason: "not_eligible",
+      };
+    }
+
+    const referrerResult = await client.query(
+      `
+        SELECT data
+        FROM users
+        WHERE data->>'id' = $1
+        FOR UPDATE
+      `,
+      [String(user.referredBy)]
+    );
+
+    const referrer =
+      referrerResult.rows[0]?.data;
+
+    if (!referrer) {
+      await client.query("COMMIT");
+
+      return {
+        rewarded: false,
+        reason: "referrer_not_found",
+      };
+    }
+
+    user.referralRewardProcessed = true;
+
+    referrer.walletBalance =
+      Number(referrer.walletBalance || 0) + 500;
+
+    await client.query(
+      `
+        UPDATE users
+        SET data = $1::jsonb
+        WHERE data->>'id' = $2
+      `,
+      [user, String(user.id)]
+    );
+
+    await client.query(
+      `
+        UPDATE users
+        SET data = $1::jsonb
+        WHERE data->>'id' = $2
+      `,
+      [referrer, String(referrer.id)]
+    );
+
+    await client.query("COMMIT");
+
+    return {
+      rewarded: true,
+      rewardAmount: 500,
+      referrerId: referrer.id,
+    };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export const db = {
   users: {
     all: () => readTable("users"),
     save: (rows) => writeTable("users", rows),
 
-    // New fast login helpers
-    findByEmail: (email) => findUserByEmail(email),
+    findByEmail: (email) =>
+      findUserByEmail(email),
+
     updateById: (userId, user) =>
       updateUserById(userId, user),
+
+    processReferralReward: (userId) =>
+      processReferralReward(userId),
   },
 
   items: {
