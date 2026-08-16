@@ -4179,6 +4179,400 @@ app.post(
 );
 
 // ============================================================
+// SELLER SUBSCRIPTION PAYMENT
+// ============================================================
+
+// Return the available seller plans.
+app.get(
+  "/api/seller/plans",
+  async (req, res) => {
+    try {
+      return res.json({
+        plans: Object.values(
+          SELLER_PLANS
+        ),
+      });
+    } catch (error) {
+      console.error(
+        "Seller plans error:",
+        error
+      );
+
+      return res.status(500).json({
+        error:
+          "Unable to load seller plans",
+      });
+    }
+  }
+);
+
+// Start a seller subscription payment.
+app.post(
+  "/api/seller/subscription/initialize",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const {
+        planId,
+      } = req.body;
+
+      const plan =
+        SELLER_PLANS[planId];
+
+      if (!plan) {
+        return res.status(400).json({
+          error:
+            "Invalid seller plan",
+        });
+      }
+
+      const users =
+        await db.users.all();
+
+      const user =
+        users.find(
+          (u) =>
+            u.id ===
+            req.user.id
+        );
+
+      if (!user) {
+        return res.status(404).json({
+          error:
+            "User not found",
+        });
+      }
+
+      if (!user.email) {
+        return res.status(400).json({
+          error:
+            "A valid email address is required before purchasing a seller plan",
+        });
+      }
+
+      const reference =
+        `SELLER-${user.id}-${plan.id}-${Date.now()}`;
+
+      const payment =
+        await initializeTransaction({
+          email: user.email,
+          amountNaira:
+            plan.price,
+          reference,
+          callback_url:
+            `${FRONTEND_URL}/seller/subscription/callback`,
+        });
+
+      return res.json({
+        success: true,
+
+        plan: {
+          id: plan.id,
+          name: plan.name,
+          price: plan.price,
+          currency: plan.currency,
+          billing: plan.billing,
+        },
+
+        reference:
+          payment.reference,
+
+        authorization_url:
+          payment.authorization_url,
+
+        access_code:
+          payment.access_code,
+      });
+    } catch (error) {
+      console.error(
+        "Seller subscription initialization error:",
+        error
+      );
+
+      return res.status(500).json({
+        error:
+          error.message ||
+          "Unable to initialize seller subscription payment",
+      });
+    }
+  }
+);
+
+// Verify seller subscription payment
+// and activate the purchased plan.
+app.post(
+  "/api/seller/subscription/verify",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const {
+        reference,
+      } = req.body;
+
+      if (!reference) {
+        return res.status(400).json({
+          error:
+            "Payment reference is required",
+        });
+      }
+
+      const payment =
+        await verifyTransaction(
+          reference
+        );
+
+      if (
+        payment.status !==
+        "success"
+      ) {
+        return res.status(400).json({
+          error:
+            "Seller subscription payment was not successful",
+        });
+      }
+
+      const users =
+        await db.users.all();
+
+      const user =
+        users.find(
+          (u) =>
+            u.id ===
+            req.user.id
+        );
+
+      if (!user) {
+        return res.status(404).json({
+          error:
+            "User not found",
+        });
+      }
+
+      // Make sure this payment belongs
+      // to a seller subscription.
+      if (
+        !reference.startsWith(
+          `SELLER-${user.id}-`
+        )
+      ) {
+        return res.status(403).json({
+          error:
+            "This payment does not belong to this seller account",
+        });
+      }
+
+      const parts =
+        reference.split("-");
+
+      const planId =
+        parts.slice(2, -1).join("-");
+
+      const plan =
+        SELLER_PLANS[planId];
+
+      if (!plan) {
+        return res.status(400).json({
+          error:
+            "Unable to determine seller plan from payment",
+        });
+      }
+
+      const expectedAmount =
+        Math.round(
+          plan.price * 100
+        );
+
+      if (
+        Number(payment.amount) !==
+        expectedAmount
+      ) {
+        return res.status(400).json({
+          error:
+            "Payment amount does not match the selected seller plan",
+        });
+      }
+
+      // Prevent the same Paystack reference
+      // from being used more than once.
+      if (
+        user.sellerSubscriptionReference ===
+        reference &&
+        user.sellerPlanStatus ===
+        "active"
+      ) {
+        return res.json({
+          success: true,
+          alreadyActivated: true,
+          plan: {
+            id: plan.id,
+            name: plan.name,
+            billing: plan.billing,
+          },
+        });
+      }
+
+      const now =
+        Date.now();
+
+      let expiresAt =
+        null;
+
+      if (
+        plan.billing ===
+        "monthly"
+      ) {
+        expiresAt =
+          new Date(
+            now
+          );
+
+        expiresAt.setMonth(
+          expiresAt.getMonth() +
+            1
+        );
+
+        expiresAt =
+          expiresAt.getTime();
+      }
+
+      if (
+        plan.billing ===
+        "yearly"
+      ) {
+        expiresAt =
+          new Date(
+            now
+          );
+
+        expiresAt.setFullYear(
+          expiresAt.getFullYear() +
+            1
+        );
+
+        expiresAt =
+          expiresAt.getTime();
+      }
+
+      user.isSeller =
+        true;
+
+      user.sellerPlan =
+        plan.id;
+
+      user.sellerPlanStatus =
+        "active";
+
+      user.sellerPlanExpiresAt =
+        expiresAt;
+
+      user.sellerSubscriptionReference =
+        reference;
+
+      await db.users.save(
+        users
+      );
+
+      return res.json({
+        success: true,
+
+        message:
+          "Seller subscription activated successfully",
+
+        plan: {
+          id: plan.id,
+          name: plan.name,
+          price: plan.price,
+          currency: plan.currency,
+          billing: plan.billing,
+          expiresAt,
+          features:
+            plan.features,
+        },
+
+        user:
+          publicUser(user),
+      });
+    } catch (error) {
+      console.error(
+        "Seller subscription verification error:",
+        error
+      );
+
+      return res.status(500).json({
+        error:
+          error.message ||
+          "Unable to verify seller subscription payment",
+      });
+    }
+  }
+);
+
+// Get the current seller subscription.
+app.get(
+  "/api/seller/subscription",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const user =
+        await getCurrentSellerUser(
+          req
+        );
+
+      if (!user) {
+        return res.status(404).json({
+          error:
+            "User not found",
+        });
+      }
+
+      const plan =
+        getSellerPlan(user);
+
+      return res.json({
+        isSeller:
+          !!user.isSeller,
+
+        plan: plan
+          ? {
+              id: plan.id,
+              name: plan.name,
+              price: plan.price,
+              currency:
+                plan.currency,
+              billing:
+                plan.billing,
+              features:
+                plan.features,
+            }
+          : null,
+
+        status:
+          user.sellerPlanStatus ||
+          "inactive",
+
+        expiresAt:
+          user.sellerPlanExpiresAt ||
+          null,
+
+        subscriptionReference:
+          user.sellerSubscriptionReference ||
+          null,
+      });
+    } catch (error) {
+      console.error(
+        "Seller subscription status error:",
+        error
+      );
+
+      return res.status(500).json({
+        error:
+          "Unable to load seller subscription",
+      });
+    }
+  }
+);
+
+// ============================================================
 // START SERVER
 // ============================================================
 
