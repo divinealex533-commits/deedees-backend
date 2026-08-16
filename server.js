@@ -1787,6 +1787,74 @@ app.get(
   }
 );
 
+function publicItem(item) {
+  const {
+    accessLinks,
+    accessLink,
+    ...safe
+  } = item;
+
+  const stockCount =
+    stockCountOf(item);
+
+  return {
+    ...safe,
+
+    ownerType:
+      getProductOwnerType(item),
+
+    // Never expose another seller's private ownership
+    // information through the public product API.
+    ownerId:
+      isSellerProduct(item)
+        ? item.ownerId
+        : null,
+
+    sourceItemId:
+      item.sourceItemId || null,
+
+    stockCount,
+
+    inStock:
+      item.inStock !== false &&
+      stockCount > 0,
+  };
+}
+
+function getProductOwnerType(item) {
+  return item.ownerType === "seller"
+    ? "seller"
+    : "deedee";
+}
+
+function isDeeDeeProduct(item) {
+  return getProductOwnerType(item) === "deedee";
+}
+
+function isSellerProduct(item) {
+  return getProductOwnerType(item) === "seller";
+}
+
+function sellerOwnsProduct(item, sellerId) {
+  return (
+    isSellerProduct(item) &&
+    String(item.ownerId) ===
+      String(sellerId)
+  );
+}
+
+function createProductOwnershipFields({
+  ownerType = "deedee",
+  ownerId = null,
+  sourceItemId = null,
+}) {
+  return {
+    ownerType,
+    ownerId,
+    sourceItemId,
+  };
+}
+
 // ============================================================
 // ADMIN ITEMS
 // ============================================================
@@ -1836,73 +1904,240 @@ app.post(
       await db.items.all();
 
     const newItem = {
-      id:
-        crypto.randomUUID(),
-
-      name,
-
-      description:
-        description || "",
-
-      price:
-        Number(price),
-
-      tonyixProductId:
-        tonyixProductId != null
-          ? Number(
-              tonyixProductId
-            )
-          : null,
-
-      imageUrl:
-        imageUrl ||
-        image ||
-        "",
-
-      categoryId:
-        categoryId || null,
-
-      accessLinks:
-        Array.isArray(
-          accessLinks
+  id:
+    crypto.randomUUID(),
+  name,
+  description:
+    description || "",
+  price:
+    Number(price),
+  tonyixProductId:
+    tonyixProductId != null
+      ? Number(
+          tonyixProductId
         )
-          ? accessLinks
-              .map((x) =>
-                String(x).trim()
-              )
-              .filter(Boolean)
-          : [],
-
-      accessLink:
-        accessLink ||
-        undefined,
-
-      quantity:
-        quantity != null
-          ? Number(quantity)
-          : undefined,
-
-      inStock:
-        inStock !== undefined
-          ? inStock
-          : true,
-
-      createdAt:
-        new Date().toISOString(),
-    };
-
-    items.push(newItem);
-
-    await db.items.save(
-      items
-    );
-
-    res.status(201).json(
-      newItem
-    );
+      : null,
+  imageUrl:
+    imageUrl ||
+    image ||
+    "",
+  categoryId:
+    categoryId || null,
+  accessLinks:
+    Array.isArray(
+      accessLinks
+    )
+      ? accessLinks
+          .map((x) =>
+            String(x).trim()
+          )
+          .filter(Boolean)
+      : [],
+  accessLink:
+    accessLink ||
+    undefined,
+  quantity:
+    quantity != null
+      ? Number(quantity)
+      : undefined,
+  inStock:
+    inStock !== undefined
+      ? inStock
+      : true,
+  // ============================================================
+  // PRODUCT OWNERSHIP
+  // ============================================================
+  // Products created by DeeDee/Admin belong to DeeDee.
+  // Sellers will NOT use this route to create their products.
+  // ============================================================
+  ...createProductOwnershipFields({
+    ownerType:
+      "deedee",
+    ownerId:
+      null,
+    sourceItemId:
+      null,
+  }),
+  createdAt:
+    new Date().toISOString(),
+};
+// ============================================================
+// SELLER — CREATE OWN PRODUCT
+// ============================================================
+app.post(
+  "/api/seller/products",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const {
+        name,
+        description,
+        price,
+        image,
+        imageUrl,
+        categoryId,
+        inStock,
+        accessLinks,
+        accessLink,
+        quantity,
+      } = req.body;
+      if (
+        !name ||
+        price == null
+      ) {
+        return res.status(400).json({
+          error:
+            "name and price are required",
+        });
+      }
+      const priceNumber =
+        Number(price);
+      if (
+        !Number.isFinite(
+          priceNumber
+        ) ||
+        priceNumber < 0
+      ) {
+        return res.status(400).json({
+          error:
+            "price must be a valid number",
+        });
+      }
+      const users =
+        await db.users.all();
+      const user =
+        users.find(
+          (u) =>
+            u.id === req.user.id
+        );
+      if (!user) {
+        return res.status(404).json({
+          error:
+            "User not found",
+        });
+      }
+      // Automatically make the account a seller
+      // when they create their first seller product.
+      user.isSeller = true;
+      const items =
+        await db.items.all();
+      const newItem = {
+        id:
+          crypto.randomUUID(),
+        name:
+          String(name).trim(),
+        description:
+          String(
+            description || ""
+          ).trim(),
+        price:
+          priceNumber,
+        tonyixProductId:
+          null,
+        tonyixSupplierPrice:
+          null,
+        imageUrl:
+          imageUrl ||
+          image ||
+          "",
+        categoryId:
+          categoryId || null,
+        accessLinks:
+          Array.isArray(
+            accessLinks
+          )
+            ? accessLinks
+                .map((x) =>
+                  String(x).trim()
+                )
+                .filter(Boolean)
+            : [],
+        accessLink:
+          accessLink ||
+          undefined,
+        quantity:
+          quantity != null
+            ? Number(quantity)
+            : undefined,
+        inStock:
+          inStock !== undefined
+            ? inStock
+            : true,
+        // ========================================================
+        // THIS PRODUCT BELONGS TO THE SELLER
+        // ========================================================
+        ownerType:
+          "seller",
+        ownerId:
+          user.id,
+        sourceItemId:
+          null,
+        createdAt:
+          new Date().toISOString(),
+      };
+      items.push(
+        newItem
+      );
+      await db.users.save(
+        users
+      );
+      await db.items.save(
+        items
+      );
+      res.status(201).json({
+        message:
+          "Seller product created successfully",
+        item:
+          publicItem(
+            newItem
+          ),
+      });
+    } catch (error) {
+      console.error(
+        "Seller product creation error:",
+        error
+      );
+      res.status(500).json({
+        error:
+          error.message ||
+          "Unable to create seller product",
+      });
+    }
   }
 );
 
+// ============================================================
+// SELLER — MY PRODUCTS
+// ============================================================
+// ============================================================
+// SELLER — MY PRODUCTS
+// ============================================================
+
+app.get(
+  "/api/seller/products",
+  requireAuth,
+  async (req, res) => {
+    const items =
+      await db.items.all();
+
+    const myProducts =
+      items.filter(
+        (item) =>
+          sellerOwnsProduct(
+            item,
+            req.user.id
+          )
+      );
+
+    res.json(
+      myProducts.map(
+        publicItem
+      )
+    );
+  }
+);
+  
+    
 app.put(
   "/api/items/:id",
   requireAuth,
