@@ -5229,6 +5229,151 @@ app.post(
 // ============================================================
 // START SERVER
 // ============================================================
+// ============================================================
+// SELLER SUBSCRIPTION — RENEWAL REMINDER + FREEZE
+// ============================================================
+
+const SELLER_RENEWAL_REMINDER_MS =
+  14 * 24 * 60 * 60 * 1000;
+
+function isPremiumSellerPlan(planId) {
+  return (
+    planId === "premium_monthly" ||
+    planId === "premium_yearly"
+  );
+}
+
+async function processSellerSubscriptionStatus() {
+  try {
+    const users = await db.users.all();
+    const now = Date.now();
+    let changed = false;
+
+    for (const user of users) {
+      if (!user?.isSeller) {
+        continue;
+      }
+
+      if (
+        !isPremiumSellerPlan(
+          user.sellerPlan
+        )
+      ) {
+        continue;
+      }
+
+      const expiresAt = Number(
+        user.sellerPlanExpiresAt || 0
+      );
+
+      if (!expiresAt) {
+        continue;
+      }
+
+      const timeRemaining =
+        expiresAt - now;
+
+      // --------------------------------------------------------
+      // 14-DAY RENEWAL REMINDER
+      // --------------------------------------------------------
+
+      if (
+        user.sellerPlanStatus === "active" &&
+        timeRemaining <=
+          SELLER_RENEWAL_REMINDER_MS &&
+        timeRemaining > 0 &&
+        !user.sellerRenewalReminderSentAt
+      ) {
+        if (user.email) {
+          try {
+            await resend.emails.send({
+              from:
+                process.env.RESEND_FROM_EMAIL ||
+                "DeeDee's <onboarding@resend.dev>",
+
+              to: user.email,
+
+              subject:
+                "Your DeeDee's Seller Subscription Renews Soon",
+
+              html: `
+                <div style="font-family:Arial,sans-serif">
+                  <h2>Seller Subscription Renewal Reminder</h2>
+
+                  <p>Hello ${
+                    user.name || "Seller"
+                  },</p>
+
+                  <p>
+                    Your DeeDee's seller subscription
+                    will expire in approximately
+                    <strong>14 days</strong>.
+                  </p>
+
+                  <p>
+                    Please renew your subscription
+                    before the expiry date to avoid
+                    your reseller access being frozen.
+                  </p>
+
+                  <p>
+                    Log in to your DeeDee's seller
+                    dashboard to renew your plan.
+                  </p>
+
+                  <p>
+                    Thank you,<br/>
+                    DeeDee's Marketplace
+                  </p>
+                </div>
+              `,
+            });
+
+            user.sellerRenewalReminderSentAt =
+              now;
+
+            changed = true;
+          } catch (emailError) {
+            console.error(
+              "Seller renewal reminder email error:",
+              emailError
+            );
+          }
+        }
+      }
+
+      // --------------------------------------------------------
+      // SUBSCRIPTION EXPIRY → FREEZE
+      // --------------------------------------------------------
+
+      if (
+        user.sellerPlanStatus === "active" &&
+        expiresAt > 0 &&
+        now >= expiresAt
+      ) {
+        user.sellerPlanStatus =
+          "frozen";
+
+        user.sellerFreezeReason =
+          "Seller subscription expired. Renewal payment is required.";
+
+        user.sellerFrozenAt =
+          new Date().toISOString();
+
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      await db.users.save(users);
+    }
+  } catch (error) {
+    console.error(
+      "Seller subscription status processing error:",
+      error
+    );
+  }
+}
 
 const PORT =
   process.env.PORT ||
@@ -5240,6 +5385,15 @@ async function startServer() {
 
     // Sync Tonyix products when backend starts.
     await syncTonyixProducts();
+
+    // Check seller subscriptions immediately
+// when the backend starts.
+await processSellerSubscriptionStatus();
+// Check seller subscriptions every hour.
+setInterval(
+  processSellerSubscriptionStatus,
+  60 * 60 * 1000
+);
 
     // Refresh Tonyix products every 15 minutes.
     setInterval(
