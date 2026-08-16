@@ -1092,6 +1092,38 @@ function syncSellerSubscription(user) {
     changed = true;
   }
 
+  // ============================================================
+// SELLER SUBSCRIPTION — FROZEN ACCOUNT PAYMENT DETAILS
+// ============================================================
+const SELLER_RENEWAL_PAYMENT_DETAILS = {
+  accountName:
+    process.env.SELLER_RENEWAL_ACCOUNT_NAME || "",
+  accountNumber:
+    process.env.SELLER_RENEWAL_ACCOUNT_NUMBER || "",
+  bankName:
+    process.env.SELLER_RENEWAL_BANK_NAME || "",
+  paymentInstructions:
+    process.env.SELLER_RENEWAL_PAYMENT_INSTRUCTIONS ||
+    "Make your subscription renewal payment to the account shown above, then contact support/admin for verification.",
+};
+
+  function getSellerSubscriptionState(user) {
+  if (!user) {
+    return {
+      isSeller: false,
+      isFrozen: false,
+      plan: null,
+    };
+  }
+  const plan = getSellerPlan(user);
+  const isFrozen =
+    user.sellerPlanStatus === "frozen";
+  return {
+    isSeller: !!user.isSeller,
+    isFrozen,
+    plan,
+  };
+}
   const plan =
     getSellerPlan(user);
 
