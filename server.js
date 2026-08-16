@@ -1911,7 +1911,7 @@ app.post(
       users.find(
         (u) =>
           u.passwordResetTokenHash ===
-          tokenHash
+          tokenHash 
       );
 
     if (!user) {
@@ -5059,6 +5059,63 @@ app.post(
       return res.status(500).json({
         error:
           "Unable to unfreeze seller",
+      });
+    }
+  }
+);
+
+// ============================================================
+// ADMIN — GET FROZEN SELLERS
+// ============================================================
+app.get(
+  "/api/admin/sellers/frozen",
+  requireAuth,
+  requireAdmin,
+  async (req, res) => {
+    try {
+      const users = await db.users.all();
+      const frozenSellers = users
+        .filter(
+          (user) =>
+            user?.isSeller === true &&
+            user?.sellerPlanStatus === "frozen"
+        )
+        .map((user) => {
+          const plan = getSellerPlan(user);
+          return {
+            id: user.id,
+            name: user.name || "",
+            email: user.email || "",
+            sellerPlan: plan
+              ? {
+                  id: plan.id,
+                  name: plan.name,
+                  price: plan.price,
+                  currency: plan.currency,
+                  billing: plan.billing,
+                }
+              : null,
+            sellerPlanStatus:
+              user.sellerPlanStatus || "inactive",
+            sellerPlanExpiresAt:
+              user.sellerPlanExpiresAt || null,
+            sellerFreezeReason:
+              user.sellerFreezeReason || "",
+            sellerFrozenAt:
+              user.sellerFrozenAt || null,
+          };
+        });
+      return res.json({
+        sellers: frozenSellers,
+      });
+    } catch (error) {
+      console.error(
+        "Admin frozen sellers error:",
+        error
+      );
+      return res.status(500).json({
+        error:
+          "Unable to load frozen sellers",
       });
     }
   }
