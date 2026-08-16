@@ -4938,6 +4938,20 @@ app.get(
         subscriptionReference:
           user.sellerSubscriptionReference ||
           null,
+        subscriptionReference:
+  user.sellerSubscriptionReference ||
+  null,
+isSellerFrozen:
+  user.sellerPlanStatus === "frozen",
+freezeReason:
+  user.sellerFreezeReason || "",
+frozenAt:
+  user.sellerFrozenAt || null,
+renewalPaymentDetails:
+  user.sellerPlanStatus === "frozen"
+    ? SELLER_RENEWAL_PAYMENT_DETAILS
+    : null,
+        
       });
     } catch (error) {
       console.error(
