@@ -2652,18 +2652,19 @@ app.post(
 const PORT =
   process.env.PORT || 3001;
 
-await initDatabase();
+async function startServer() {
+  try {
+    await initDatabase();
 
-// Sync Tonyix products when the backend starts.
-await syncTonyixProducts();
+    // Sync Tonyix products when the backend starts.
+    await syncTonyixProducts();
 
-// Then refresh Tonyix products every 15 minutes.
-setInterval(
-  syncTonyixProducts,
-  15 * 60 * 1000
-);
+    // Refresh Tonyix products every 15 minutes.
+    setInterval(
+      syncTonyixProducts,
+      15 * 60 * 1000
+    );
 
-app.listen(PORT, () => {
     app.listen(PORT, () => {
       console.log(
         `Server running on http://localhost:${PORT}`
