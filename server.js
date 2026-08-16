@@ -2349,9 +2349,9 @@ app.post(
         return res.status(404).json({
           error:
             "User not found",
-        });
-      }
-      /
+        });      
+       }
+
       const items =
         await db.items.all();
       const newItem = {
