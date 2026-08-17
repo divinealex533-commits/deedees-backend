@@ -2171,6 +2171,16 @@ app.get(
 
 // Get the current user's seller profile.
 
+app.get(
+  "/api/seller/profile",
+  requireAuth,
+  requireSellerAccess,
+  async (req, res) => {
+    const users = await db.users.all();
+
+    const user = users.find(
+      (u) => u.id === req.user.id
+    );
 
     if (!user) {
       return res.status(404).json({
