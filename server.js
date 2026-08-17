@@ -1158,9 +1158,274 @@ const SELLER_RENEWAL_PAYMENT_DETAILS = {
   return changed;
 }
 
-async function getCurrentSellerUser(
-  req
-) {
+async function getCurrentSellerUser(req) {
+  /*
+   * ============================================================
+   * ADMIN SELLER TEST MODE
+   * ============================================================
+   *
+   * Only an authenticated admin can activate this mode.
+   *
+   * The frontend sends:
+   *
+   * x-admin-seller-test-plan:
+   *   standard_seller
+   *   premium_monthly
+   *   premium_yearly
+   *
+   * Each plan gets its own isolated test seller account.
+   *
+   * This does NOT activate a real customer's subscription
+   * and does NOT involve Paystack.
+   */
+
+  const requestedTestPlan =
+    String(
+      req.headers["x-admin-seller-test-plan"] || ""
+    ).trim();
+
+  const isAdmin =
+    req.user?.isAdmin === true;
+
+  const validTestPlans = [
+    "standard_seller",
+    "premium_monthly",
+    "premium_yearly",
+  ];
+
+  if (
+    isAdmin &&
+    validTestPlans.includes(
+      requestedTestPlan
+    )
+  ) {
+    const users =
+      await db.users.all();
+
+    const testUserId =
+      `admin-test-seller-${requestedTestPlan}`;
+
+    let testUser =
+      users.find(
+        (user) =>
+          user.id === testUserId
+      );
+
+    const plan =
+      SELLER_PLANS[
+        requestedTestPlan
+      ];
+
+    if (!plan) {
+      return null;
+    }
+
+    let changed = false;
+
+    if (!testUser) {
+      let expiresAt = null;
+
+      if (
+        plan.billing ===
+        "monthly"
+      ) {
+        expiresAt =
+          Date.now() +
+          365 *
+            24 *
+            60 *
+            60 *
+            1000;
+      }
+
+      if (
+        plan.billing ===
+        "yearly"
+      ) {
+        expiresAt =
+          Date.now() +
+          365 *
+            10 *
+            24 *
+            60 *
+            60 *
+            1000;
+      }
+
+      testUser = {
+        id: testUserId,
+
+        name:
+          `Admin Test Seller — ${plan.name}`,
+
+        email:
+          `admin-test-${requestedTestPlan}@deedees.local`,
+
+        passwordHash:
+          "ADMIN_SELLER_TEST_ACCOUNT",
+
+        walletBalance: 0,
+
+        isAdmin: false,
+
+        isSeller: true,
+
+        sellerTestMode: true,
+
+        sellerPlan:
+          plan.id,
+
+        sellerPlanStatus:
+          "active",
+
+        sellerPlanExpiresAt:
+          expiresAt,
+
+        sellerSubscriptionReference:
+          `ADMIN-TEST-${plan.id}`,
+
+        sellerStoreName:
+          `Admin Test Store — ${plan.name}`,
+
+        sellerStoreSlug:
+          `admin-test-${requestedTestPlan}`,
+
+        sellerDescription:
+          "Private administrator test storefront.",
+
+        sellerLogoUrl: "",
+
+        sellerMarkup: 0,
+
+        sellerSupportEmail: "",
+
+        sellerWhatsappLink: "",
+
+        sellerPayoutEmail:
+          `admin-test-${requestedTestPlan}@deedees.local`,
+
+        sellerPayoutAccountName:
+          "Admin Seller Test",
+
+        sellerPayoutAccountNumber:
+          "",
+
+        sellerPayoutBankCode:
+          "",
+
+        sellerRenewalReminderSentAt:
+          null,
+
+        sellerFrozenAt:
+          null,
+
+        sellerFreezeReason:
+          null,
+
+        sellerRenewalPaymentReference:
+          null,
+
+        purchasedItemIds: [],
+
+        referralCode:
+          `ADMINTEST-${requestedTestPlan}`,
+
+        referredBy: null,
+
+        referralRewardProcessed:
+          false,
+
+        createdAt:
+          new Date().toISOString(),
+      };
+
+      users.push(testUser);
+
+      changed = true;
+    } else {
+      /*
+       * Keep the selected test plan active.
+       */
+
+      if (
+        testUser.sellerPlan !==
+        plan.id
+      ) {
+        testUser.sellerPlan =
+          plan.id;
+
+        changed = true;
+      }
+
+      if (
+        testUser.sellerPlanStatus !==
+        "active"
+      ) {
+        testUser.sellerPlanStatus =
+          "active";
+
+        changed = true;
+      }
+
+      testUser.isSeller = true;
+      testUser.sellerTestMode = true;
+
+      /*
+       * Make Premium test subscriptions effectively
+       * non-expiring for testing.
+       */
+
+      if (
+        plan.billing ===
+        "monthly"
+      ) {
+        testUser.sellerPlanExpiresAt =
+          Date.now() +
+          365 *
+            24 *
+            60 *
+            60 *
+            1000;
+      }
+
+      if (
+        plan.billing ===
+        "yearly"
+      ) {
+        testUser.sellerPlanExpiresAt =
+          Date.now() +
+          10 *
+            365 *
+            24 *
+            60 *
+            60 *
+            1000;
+      }
+
+      if (
+        plan.billing ===
+        "one_time"
+      ) {
+        testUser.sellerPlanExpiresAt =
+          null;
+      }
+    }
+
+    if (changed) {
+      await db.users.save(
+        users
+      );
+    }
+
+    return testUser;
+  }
+
+  /*
+   * ============================================================
+   * NORMAL SELLER ACCOUNT
+   * ============================================================
+   */
+
   const users =
     await db.users.all();
 
@@ -1181,7 +1446,9 @@ async function getCurrentSellerUser(
     );
 
   if (changed) {
-    await db.users.save(users);
+    await db.users.save(
+      users
+    );
   }
 
   return user;
