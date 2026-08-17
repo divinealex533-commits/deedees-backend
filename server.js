@@ -3141,6 +3141,382 @@ app.put(
 );
 
 // ============================================================
+// SELLER LISTINGS — FRONTEND COMPATIBILITY ROUTES
+// ============================================================
+
+// Get my seller listings
+app.get(
+  "/api/seller/listings",
+  requireAuth,
+  requireSellerAccess,
+  async (req, res) => {
+    const items = await db.items.all();
+
+    const listings = items.filter((item) =>
+      sellerOwnsProduct(item, req.user.id)
+    );
+
+    res.json(listings.map(publicItem));
+  }
+);
+
+// Create seller listing
+app.post(
+  "/api/seller/listings",
+  requireAuth,
+  requireSellerAccess,
+  async (req, res) => {
+    try {
+      const {
+        title,
+        name,
+        description,
+        price,
+        imageUrl,
+        image,
+        categoryId,
+        quantity,
+        accessLinks,
+        accessLink,
+      } = req.body;
+
+      const productName =
+        String(title || name || "").trim();
+
+      if (!productName || price == null) {
+        return res.status(400).json({
+          error: "title and price are required",
+        });
+      }
+
+      const priceNumber = Number(price);
+
+      if (
+        !Number.isFinite(priceNumber) ||
+        priceNumber < 0
+      ) {
+        return res.status(400).json({
+          error: "price must be a valid number",
+        });
+      }
+
+      const items = await db.items.all();
+
+      const newItem = {
+        id: crypto.randomUUID(),
+
+        name: productName,
+
+        description:
+          String(description || "").trim(),
+
+        price: priceNumber,
+
+        tonyixProductId: null,
+
+        tonyixSupplierPrice: null,
+
+        imageUrl:
+          imageUrl ||
+          image ||
+          "",
+
+        categoryId:
+          categoryId || null,
+
+        accessLinks:
+          Array.isArray(accessLinks)
+            ? accessLinks
+                .map((x) => String(x).trim())
+                .filter(Boolean)
+            : [],
+
+        accessLink:
+          accessLink || undefined,
+
+        quantity:
+          quantity != null
+            ? Number(quantity)
+            : undefined,
+
+        inStock:
+          quantity != null
+            ? Number(quantity) > 0
+            : true,
+
+        ownerType: "seller",
+
+        ownerId: req.user.id,
+
+        sourceItemId: null,
+
+        createdAt:
+          new Date().toISOString(),
+      };
+
+      items.push(newItem);
+
+      await db.items.save(items);
+
+      res.status(201).json({
+        message:
+          "Seller listing created successfully",
+
+        listing: publicItem(newItem),
+
+        item: publicItem(newItem),
+      });
+    } catch (error) {
+      console.error(
+        "Seller listing creation error:",
+        error
+      );
+
+      res.status(500).json({
+        error:
+          error.message ||
+          "Unable to create seller listing",
+      });
+    }
+  }
+);
+
+// Update seller listing
+app.put(
+  "/api/seller/listings/:id",
+  requireAuth,
+  requireSellerAccess,
+  async (req, res) => {
+    const items = await db.items.all();
+
+    const item = items.find(
+      (i) =>
+        i.id === req.params.id &&
+        sellerOwnsProduct(
+          i,
+          req.user.id
+        )
+    );
+
+    if (!item) {
+      return res.status(404).json({
+        error: "Seller listing not found",
+      });
+    }
+
+    const {
+      title,
+      name,
+      description,
+      price,
+      imageUrl,
+      image,
+      categoryId,
+      quantity,
+      inStock,
+    } = req.body;
+
+    if (title !== undefined || name !== undefined) {
+      item.name = String(
+        title ?? name
+      ).trim();
+    }
+
+    if (description !== undefined) {
+      item.description =
+        String(description).trim();
+    }
+
+    if (price !== undefined) {
+      const priceNumber = Number(price);
+
+      if (
+        !Number.isFinite(priceNumber) ||
+        priceNumber < 0
+      ) {
+        return res.status(400).json({
+          error:
+            "price must be a valid number",
+        });
+      }
+
+      item.price = priceNumber;
+    }
+
+    if (imageUrl !== undefined) {
+      item.imageUrl = imageUrl;
+    } else if (image !== undefined) {
+      item.imageUrl = image;
+    }
+
+    if (categoryId !== undefined) {
+      item.categoryId = categoryId;
+    }
+
+    if (quantity !== undefined) {
+      item.quantity = Number(quantity);
+
+      item.inStock =
+        Number(quantity) > 0;
+    }
+
+    if (inStock !== undefined) {
+      item.inStock = inStock;
+    }
+
+    await db.items.save(items);
+
+    res.json({
+      message:
+        "Seller listing updated successfully",
+
+      listing: publicItem(item),
+
+      item: publicItem(item),
+    });
+  }
+);
+
+// Delete seller listing
+app.delete(
+  "/api/seller/listings/:id",
+  requireAuth,
+  requireSellerAccess,
+  async (req, res) => {
+    const items = await db.items.all();
+
+    const item = items.find(
+      (i) =>
+        i.id === req.params.id &&
+        sellerOwnsProduct(
+          i,
+          req.user.id
+        )
+    );
+
+    if (!item) {
+      return res.status(404).json({
+        error: "Seller listing not found",
+      });
+    }
+
+    const remaining = items.filter(
+      (i) => i.id !== req.params.id
+    );
+
+    await db.items.save(remaining);
+
+    res.json({
+      message:
+        "Seller listing deleted successfully",
+    });
+  }
+);
+
+// Toggle seller listing
+app.post(
+  "/api/seller/listings/:id/toggle",
+  requireAuth,
+  requireSellerAccess,
+  async (req, res) => {
+    const items = await db.items.all();
+
+    const item = items.find(
+      (i) =>
+        i.id === req.params.id &&
+        sellerOwnsProduct(
+          i,
+          req.user.id
+        )
+    );
+
+    if (!item) {
+      return res.status(404).json({
+        error: "Seller listing not found",
+      });
+    }
+
+    item.inStock = !item.inStock;
+
+    await db.items.save(items);
+
+    res.json({
+      message:
+        "Seller listing status updated",
+
+      listing: publicItem(item),
+
+      item: publicItem(item),
+    });
+  }
+);
+
+// Add seller credentials/access links
+app.post(
+  "/api/seller/listings/:id/add-access-links",
+  requireAuth,
+  requireSellerAccess,
+  async (req, res) => {
+    const {
+      credentials,
+    } = req.body;
+
+    if (
+      !Array.isArray(credentials) ||
+      credentials.length === 0
+    ) {
+      return res.status(400).json({
+        error:
+          "At least one credential is required",
+      });
+    }
+
+    const items = await db.items.all();
+
+    const item = items.find(
+      (i) =>
+        i.id === req.params.id &&
+        sellerOwnsProduct(
+          i,
+          req.user.id
+        )
+    );
+
+    if (!item) {
+      return res.status(404).json({
+        error: "Seller listing not found",
+      });
+    }
+
+    if (!Array.isArray(item.accessLinks)) {
+      item.accessLinks = [];
+    }
+
+    const cleaned =
+      credentials
+        .map((c) => String(c).trim())
+        .filter(Boolean);
+
+    item.accessLinks.push(...cleaned);
+
+    item.quantity =
+      item.accessLinks.length;
+
+    item.inStock = true;
+
+    await db.items.save(items);
+
+    res.json({
+      message:
+        `Added ${cleaned.length} credential(s)`,
+
+      stockCount:
+        item.accessLinks.length,
+    });
+  }
+);
+
+// ============================================================
 // ADD CREDENTIALS
 // ============================================================
 
