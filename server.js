@@ -5055,106 +5055,6 @@ renewalPaymentDetails:
 );
 
 // ============================================================
-// ADMIN — UNFREEZE SELLER AFTER PAYMENT CONFIRMATION
-// ============================================================
-app.post(
-  "/api/admin/sellers/:sellerId/unfreeze",
-  requireAuth,
-  requireAdmin,
-  async (req, res) => {
-    try {
-      const { sellerId } = req.params;
-      const {
-        paymentConfirmed,
-      } = req.body;
-      if (
-        paymentConfirmed !== true
-      ) {
-        return res.status(400).json({
-          error:
-            "Payment confirmation is required before unfreezing this seller",
-        });
-      }
-      const users =
-        await db.users.all();
-      const seller =
-        users.find(
-          (u) =>
-            String(u.id) ===
-            String(sellerId)
-        );
-      if (!seller) {
-        return res.status(404).json({
-          error:
-            "Seller not found",
-        });
-      }
-      if (
-        !seller.isSeller
-      ) {
-        return res.status(400).json({
-          error:
-            "This user is not a seller",
-        });
-      }
-      if (
-        seller.sellerPlanStatus !==
-        "frozen"
-      ) {
-        return res.status(400).json({
-          error:
-            "Seller is not currently frozen",
-        });
-      }
-      const plan =
-        getSellerPlan(seller);
-      if (!plan) {
-        return res.status(400).json({
-          error:
-            "Seller subscription plan not found",
-        });
-      }
-      seller.sellerPlanStatus =
-        "active";
-      seller.sellerFreezeReason =
-        "";
-      seller.sellerFrozenAt =
-        null;
-      seller.sellerRenewalReminderSentAt =
-        null;
-      seller.sellerUnfrozenAt =
-        new Date().toISOString();
-      seller.sellerUnfrozenBy =
-        req.user.id
-      await db.users.save(users);
-      return res.json({
-        success: true,
-        message:
-          "Seller has been unfrozen successfully",
-        seller: {
-          id: seller.id,
-          sellerPlan:
-            seller.sellerPlan,
-          sellerPlanStatus:
-            seller.sellerPlanStatus,
-          sellerPlanExpiresAt:
-            seller.sellerPlanExpiresAt,
-        },
-      });
-    } catch (error) {
-      console.error(
-        "Admin seller unfreeze error:",
-        error
-      );
-      return res.status(500).json({
-        error:
-          "Unable to unfreeze seller",
-      });
-    }
-  }
-);
-
-// ============================================================
 // ADMIN — GET FROZEN SELLERS
 // ============================================================
 app.get(
@@ -5212,105 +5112,143 @@ app.get(
 );
 
 // ============================================================
-// ADMIN — SELLER SUBSCRIPTION PAYMENT VERIFICATION / UNFREEZE
+// ADMIN — UNFREEZE SELLER AFTER PAYMENT CONFIRMATION
 // ============================================================
+//
+// Handles both:
+// - Standard Seller (one-time payment)
+// - Premium Monthly
+// - Premium Yearly
+//
+// Frontend must send:
+// {
+//   paymentConfirmed: true
+// }
+// ============================================================
+
 app.post(
   "/api/admin/sellers/:userId/unfreeze",
   requireAuth,
   requireAdmin,
   async (req, res) => {
     try {
+      const { userId } = req.params;
+      const { paymentConfirmed } = req.body;
+
+      // Never unfreeze a seller without explicit payment confirmation.
+      if (paymentConfirmed !== true) {
+        return res.status(400).json({
+          error:
+            "Payment confirmation is required before unfreezing this seller",
+        });
+      }
+
       const users = await db.users.all();
+
       const userIndex = users.findIndex(
-        (u) => String(u.id) === String(req.params.userId)
+        (user) =>
+          String(user.id) === String(userId)
       );
+
       if (userIndex === -1) {
         return res.status(404).json({
           error: "Seller not found",
         });
       }
+
       const seller = users[userIndex];
-      if (
-        seller.sellerPlanStatus !== "frozen"
-      ) {
-        return res.status(400).json({
-          error:
-            "Seller account is not currently frozen",
-        });
-      }
+
       const plan = getSellerPlan(seller);
+
       if (!plan) {
         return res.status(400).json({
           error:
             "Seller does not have a valid subscription plan",
         });
       }
+
       const now = Date.now();
+
+      // ========================================================
+      // STANDARD SELLER
+      // ========================================================
+      //
+      // Standard Seller is a one-time plan.
+      // It does not use subscription expiry.
+      // ========================================================
+
+      if (plan.id === "standard_seller") {
+        seller.sellerPlanStatus = "active";
+        seller.sellerFreezeReason = "";
+        seller.sellerFrozenAt = null;
+
+        users[userIndex] = seller;
+
+        await db.users.save(users);
+
+        return res.json({
+          success: true,
+          message: "Standard Seller access restored",
+          sellerId: seller.id,
+          plan: plan.id,
+          status: seller.sellerPlanStatus,
+        });
+      }
+
+      // ========================================================
+      // PREMIUM SELLER
+      // ========================================================
+
       let newExpiresAt = null;
+
       if (plan.id === "premium_monthly") {
         newExpiresAt =
           now +
           30 * 24 * 60 * 60 * 1000;
       }
+
       if (plan.id === "premium_yearly") {
         newExpiresAt =
           now +
           365 * 24 * 60 * 60 * 1000;
       }
-      /*
-       * Standard Seller is a one-time plan.
-       * It should not normally reach the frozen
-       * subscription-renewal flow.
-       */
-      if (
-        plan.id === "standard_seller"
-      ) {
-        seller.sellerPlanStatus =
-          "active";
-        seller.sellerFreezeReason = "";
-        seller.sellerFrozenAt = null;
-        users[userIndex] = seller;
-        await db.users.save(users);
-        return res.json({
-          success: true,
-          message:
-            "Standard Seller access restored",
-          sellerId: seller.id,
-          status:
-            seller.sellerPlanStatus,
+
+      if (!newExpiresAt) {
+        return res.status(400).json({
+          error:
+            "Seller subscription plan cannot be renewed",
         });
       }
-      seller.sellerPlanStatus =
-        "active";
-      seller.sellerPlanExpiresAt =
-        newExpiresAt;
+
+      seller.sellerPlanStatus = "active";
+      seller.sellerPlanExpiresAt = newExpiresAt;
       seller.sellerFreezeReason = "";
       seller.sellerFrozenAt = null;
-      seller.sellerRenewalVerifiedAt =
-        now;
-      seller.sellerRenewalVerifiedBy =
-        req.user.id;
+      seller.sellerRenewalVerifiedAt = now;
+      seller.sellerRenewalVerifiedBy = req.user.id;
+
       users[userIndex] = seller;
+
       await db.users.save(users);
+
       return res.json({
         success: true,
         message:
           "Seller subscription payment verified and access restored",
         sellerId: seller.id,
         plan: plan.id,
-        status:
-          seller.sellerPlanStatus,
-        expiresAt:
-          seller.sellerPlanExpiresAt,
+        status: seller.sellerPlanStatus,
+        expiresAt: seller.sellerPlanExpiresAt,
       });
     } catch (error) {
       console.error(
-        "Admin seller unfreeze error:",
+        "Unfreeze seller error:",
         error
       );
+
       return res.status(500).json({
         error:
-          "Unable to unfreeze seller account",
+          "Failed to unfreeze seller",
       });
     }
   }
