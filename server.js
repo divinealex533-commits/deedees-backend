@@ -2282,6 +2282,78 @@ app.get(
   }
 );
 
+// ============================================================
+// SELLER SUBSCRIPTION
+// Returns the current seller's subscription status.
+// ============================================================
+app.get(
+  "/api/seller/subscription",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const subscriptions =
+        await db.sellerSubscriptions.all();
+
+      const subscription =
+        subscriptions.find(
+          (sub) =>
+            String(sub.userId) ===
+            String(req.user.id)
+        );
+
+      // No subscription yet.
+      if (!subscription) {
+        return res.json({
+          subscription: {
+            active: false,
+            status: "inactive",
+            plan: null,
+            expiresAt: null,
+          },
+        });
+      }
+
+      const expiresAt =
+        subscription.expiresAt || null;
+
+      const expired =
+        expiresAt &&
+        new Date(expiresAt).getTime() <=
+          Date.now();
+
+      if (expired) {
+        return res.json({
+          subscription: {
+            ...subscription,
+            active: false,
+            status: "expired",
+          },
+        });
+      }
+
+      return res.json({
+        subscription: {
+          ...subscription,
+          active:
+            subscription.status === "active",
+          status:
+            subscription.status || "active",
+        },
+      });
+    } catch (error) {
+      console.error(
+        "Seller subscription error:",
+        error
+      );
+
+      return res.status(500).json({
+        error:
+          "Failed to load seller subscription",
+      });
+    }
+  }
+);
+
 // Create/update seller profile.
 app.put(
   "/api/seller/profile",
