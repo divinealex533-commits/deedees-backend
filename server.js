@@ -2445,6 +2445,96 @@ app.put(
 );
 
 // ============================================================
+// ADMIN — GET ALL RESELLER ACCOUNTS
+// Used by the Reseller System Diagnostic & Control Center.
+// ============================================================
+app.get(
+  "/api/admin/sellers",
+  requireAuth,
+  requireAdmin,
+  async (req, res) => {
+    try {
+      const users = await db.users.all();
+      const sellers = users
+        .filter(
+          (user) =>
+            user?.isSeller === true
+        )
+        .map((user) => {
+          const plan =
+            getSellerPlan(user);
+          return {
+            id: user.id,
+            name: user.name || "",
+            email: user.email || "",
+            isSeller:
+              user.isSeller === true,
+            sellerPlan:
+              plan
+                ? {
+                    id: plan.id,
+                    name: plan.name,
+                    price: plan.price,
+                    currency: plan.currency,
+                    billing: plan.billing,
+                    features:
+                      plan.features || [],
+                  }
+                : user.sellerPlan || null,
+            sellerPlanStatus:
+              user.sellerPlanStatus ||
+              "inactive",
+            sellerPlanExpiresAt:
+              user.sellerPlanExpiresAt ||
+              null,
+            sellerSubscriptionReference:
+              user.sellerSubscriptionReference ||
+              null,
+            sellerFreezeReason:
+              user.sellerFreezeReason ||
+              "",
+            sellerFrozenAt:
+              user.sellerFrozenAt ||
+              null,
+            sellerStoreName:
+              user.sellerStoreName ||
+              user.resellerStoreName ||
+              "",
+            sellerStoreSlug:
+              user.sellerStoreSlug ||
+              user.resellerStoreSlug ||
+              "",
+            sellerStoreUrl:
+              user.sellerStoreUrl ||
+              user.storefrontUrl ||
+              "",
+            storefrontUrl:
+              user.storefrontUrl ||
+              user.sellerStoreUrl ||
+              "",
+          };
+        });
+      return res.json({
+        success: true,
+        plans: Object.values(
+          SELLER_PLANS
+        ),
+        sellers,
+      });
+    } catch (error) {
+      console.error(
+        "Admin all sellers error:",
+        error
+      );
+      return res.status(500).json({
+        error:
+          "Unable to load reseller accounts",
+      });
+    }
+  }
+);
+
+// ============================================================
 // PUBLIC ITEMS
 // ============================================================
 
