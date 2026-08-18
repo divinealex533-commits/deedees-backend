@@ -3156,10 +3156,10 @@ app.get(
             new Date().toISOString(),
         };
 
-        storefronts.push(storefront);
+                storefronts.push(storefront);
 
         await db.sellerStorefronts.save(storefronts);
-      
+      }
 
       if (!storefront) {
         return res.status(404).json({
