@@ -3104,6 +3104,283 @@ app.post(
 );
 
 // ============================================================
+// SELLER — STOREFRONT
+// ============================================================
+
+app.get(
+  "/api/seller/storefront",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const seller = await getCurrentSellerUser(req);
+
+      if (!seller) {
+        return res.status(404).json({
+          error: "Seller account not found",
+        });
+      }
+
+      const storefronts =
+        await db.seller_storefronts.all();
+
+      let storefront =
+        storefronts.find(
+          (store) =>
+            String(store.ownerId) ===
+            String(seller.id)
+        );
+
+      // Create the admin test storefront automatically
+      // when Admin Seller Test Mode is active.
+      if (
+        !storefront &&
+        seller.sellerTestMode === true
+      ) {
+        storefront = {
+          id: crypto.randomUUID(),
+          ownerId: seller.id,
+          storeName:
+            seller.sellerStoreName ||
+            "Admin Test Store",
+          slug:
+            seller.sellerStoreSlug ||
+            `admin-test-${seller.sellerPlan}`,
+          description:
+            seller.sellerDescription || "",
+          logoUrl:
+            seller.sellerLogoUrl || "",
+          bannerUrl: "",
+          createdAt:
+            new Date().toISOString(),
+          updatedAt:
+            new Date().toISOString(),
+        };
+
+        storefronts.push(storefront);
+
+        await db.seller_storefronts.save(
+          storefronts
+        );
+      }
+
+      if (!storefront) {
+        return res.status(404).json({
+          error: "Seller storefront not found",
+        });
+      }
+
+      res.json(storefront);
+    } catch (error) {
+      console.error(
+        "GET /api/seller/storefront failed:",
+        error
+      );
+
+      res.status(500).json({
+        error:
+          error.message ||
+          "Failed to load seller storefront",
+      });
+    }
+  }
+);
+
+app.post(
+  "/api/seller/storefront",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const seller = await getCurrentSellerUser(req);
+
+      if (!seller) {
+        return res.status(404).json({
+          error: "Seller account not found",
+        });
+      }
+
+      const {
+        storeName,
+        description,
+        logoUrl,
+        bannerUrl,
+      } = req.body;
+
+      if (!storeName || !String(storeName).trim()) {
+        return res.status(400).json({
+          error: "storeName is required",
+        });
+      }
+
+      const storefronts =
+        await db.seller_storefronts.all();
+
+      const existing =
+        storefronts.find(
+          (store) =>
+            String(store.ownerId) ===
+            String(seller.id)
+        );
+
+      if (existing) {
+        return res.status(409).json({
+          error:
+            "Seller storefront already exists",
+        });
+      }
+
+      const storefront = {
+        id: crypto.randomUUID(),
+        ownerId: seller.id,
+        storeName: String(storeName).trim(),
+        slug:
+          seller.sellerStoreSlug ||
+          String(storeName)
+            .trim()
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, "-")
+            .replace(/^-+|-+$/g, ""),
+        description:
+          description || "",
+        logoUrl:
+          logoUrl || "",
+        bannerUrl:
+          bannerUrl || "",
+        createdAt:
+          new Date().toISOString(),
+        updatedAt:
+          new Date().toISOString(),
+      };
+
+      storefronts.push(storefront);
+
+      await db.seller_storefronts.save(
+        storefronts
+      );
+
+      res.status(201).json(storefront);
+    } catch (error) {
+      console.error(
+        "POST /api/seller/storefront failed:",
+        error
+      );
+
+      res.status(500).json({
+        error:
+          error.message ||
+          "Failed to create seller storefront",
+      });
+    }
+  }
+);
+
+app.put(
+  "/api/seller/storefront",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const seller = await getCurrentSellerUser(req);
+
+      if (!seller) {
+        return res.status(404).json({
+          error: "Seller account not found",
+        });
+      }
+
+      const storefronts =
+        await db.seller_storefronts.all();
+
+      const storefront =
+        storefronts.find(
+          (store) =>
+            String(store.ownerId) ===
+            String(seller.id)
+        );
+
+      if (!storefront) {
+        return res.status(404).json({
+          error: "Seller storefront not found",
+        });
+      }
+
+      const allowedFields = [
+        "storeName",
+        "description",
+        "logoUrl",
+        "bannerUrl",
+      ];
+
+      for (const field of allowedFields) {
+        if (
+          Object.prototype.hasOwnProperty.call(
+            req.body,
+            field
+          )
+        ) {
+          storefront[field] =
+            req.body[field];
+        }
+      }
+
+      storefront.updatedAt =
+        new Date().toISOString();
+
+      await db.seller_storefronts.save(
+        storefronts
+      );
+
+      res.json(storefront);
+    } catch (error) {
+      console.error(
+        "PUT /api/seller/storefront failed:",
+        error
+      );
+
+      res.status(500).json({
+        error:
+          error.message ||
+          "Failed to update seller storefront",
+      });
+    }
+  }
+);
+
+app.get(
+  "/api/seller/storefront/:slug",
+  async (req, res) => {
+    try {
+      const storefronts =
+        await db.seller_storefronts.all();
+
+      const storefront =
+        storefronts.find(
+          (store) =>
+            String(store.slug) ===
+            String(req.params.slug)
+        );
+
+      if (!storefront) {
+        return res.status(404).json({
+          error: "Seller storefront not found",
+        });
+      }
+
+      res.json(storefront);
+    } catch (error) {
+      console.error(
+        "GET /api/seller/storefront/:slug failed:",
+        error
+      );
+
+      res.status(500).json({
+        error:
+          error.message ||
+          "Failed to load seller storefront",
+      });
+    }
+  }
+);
+
+// ============================================================
 // SELLER — CREATE OWN PRODUCT
 // ============================================================
 app.post(
