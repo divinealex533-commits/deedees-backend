@@ -3251,8 +3251,7 @@ app.post(
 
       storefronts.push(storefront);
 
-      await db.sellerStorefronts.all();
-      );
+      await db.sellerStorefronts.save(storefronts);
 
       res.status(201).json(storefront);
     } catch (error) {
