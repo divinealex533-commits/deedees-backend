@@ -7424,6 +7424,287 @@ app.get(
 );
 
 // ============================================================
+// ADMIN — INSPECT ONE REAL RESELLER WEBSITE
+// ============================================================
+//
+// Returns the selected reseller's real storefront and
+// real listings for administrator inspection.
+//
+// IMPORTANT:
+// - Admin only.
+// - Test sellers are excluded.
+// - Seller subscription status does NOT block inspection.
+// - No Paystack.
+// - No subscription activation.
+// - No purchase.
+// - No inventory mutation.
+// - Access credentials are intentionally NOT returned.
+// ============================================================
+
+app.get(
+  "/api/admin/reseller-inspection/:sellerId",
+  requireAuth,
+  requireAdmin,
+  async (req, res) => {
+    try {
+      const sellerId =
+        String(req.params.sellerId);
+
+      const [
+        users,
+        storefronts,
+        items,
+      ] = await Promise.all([
+        db.users.all(),
+        db.sellerStorefronts.all(),
+        db.items.all(),
+      ]);
+
+      const seller =
+        users.find(
+          (user) =>
+            String(user.id) ===
+            sellerId
+        );
+
+      if (!seller) {
+        return res.status(404).json({
+          error:
+            "Reseller account not found",
+        });
+      }
+
+      if (
+        seller.isSeller !== true ||
+        seller.sellerTestMode === true
+      ) {
+        return res.status(404).json({
+          error:
+            "Real reseller account not found",
+        });
+      }
+
+      const storefront =
+        storefronts.find(
+          (store) =>
+            String(store.ownerId) ===
+            sellerId
+        );
+
+      if (!storefront) {
+        return res.status(404).json({
+          error:
+            "Reseller storefront not found",
+        });
+      }
+
+      const sellerListings =
+        items
+          .filter(
+            (item) =>
+              String(
+                item.ownerId ??
+                item.sellerId ??
+                item.userId ??
+                ""
+              ) === sellerId
+          )
+          .map((item) => {
+            let stockCount = 0;
+
+            if (
+              Array.isArray(
+                item.accessLinks
+              )
+            ) {
+              stockCount =
+                item.accessLinks.length;
+            } else if (
+              item.quantity != null
+            ) {
+              stockCount =
+                Math.max(
+                  0,
+                  Number(
+                    item.quantity
+                  )
+                );
+            } else {
+              stockCount =
+                item.sold
+                  ? 0
+                  : 1;
+            }
+
+            return {
+              id: item.id,
+
+              name:
+                item.name ||
+                item.title ||
+                "",
+
+              title:
+                item.title ||
+                item.name ||
+                "",
+
+              description:
+                item.description ||
+                "",
+
+              price:
+                Number(item.price || 0),
+
+              imageUrl:
+                item.imageUrl ||
+                "",
+
+              categoryId:
+                item.categoryId ||
+                null,
+
+              inStock:
+                item.inStock !== false,
+
+              sold:
+                item.sold === true,
+
+              quantity:
+                item.quantity != null
+                  ? Number(
+                      item.quantity
+                    )
+                  : null,
+
+              stockCount,
+
+              hasAccessLinks:
+                Array.isArray(
+                  item.accessLinks
+                ) &&
+                item.accessLinks.length > 0,
+
+              tonyixProductId:
+                item.tonyixProductId ??
+                null,
+
+              sellerStoreSlug:
+                item.sellerStoreSlug ||
+                storefront.slug ||
+                "",
+
+              sellerStoreName:
+                item.sellerStoreName ||
+                storefront.storeName ||
+                "",
+
+              createdAt:
+                item.createdAt ||
+                null,
+
+              updatedAt:
+                item.updatedAt ||
+                null,
+            };
+          });
+
+      return res.json({
+        seller: {
+          id: seller.id,
+
+          name:
+            seller.name || "",
+
+          email:
+            seller.email || "",
+
+          isSeller:
+            seller.isSeller === true,
+
+          sellerPlan:
+            seller.sellerPlan ||
+            null,
+
+          sellerPlanStatus:
+            seller.sellerPlanStatus ||
+            "inactive",
+
+          sellerPlanExpiresAt:
+            seller.sellerPlanExpiresAt ||
+            null,
+
+          sellerFrozenAt:
+            seller.sellerFrozenAt ||
+            null,
+
+          sellerFreezeReason:
+            seller.sellerFreezeReason ||
+            "",
+        },
+
+        storefront: {
+          id:
+            storefront.id,
+
+          ownerId:
+            storefront.ownerId,
+
+          storeName:
+            storefront.storeName ||
+            seller.sellerStoreName ||
+            "",
+
+          slug:
+            storefront.slug ||
+            seller.sellerStoreSlug ||
+            "",
+
+          description:
+            storefront.description ||
+            seller.sellerDescription ||
+            "",
+
+          logoUrl:
+            storefront.logoUrl ||
+            seller.sellerLogoUrl ||
+            "",
+
+          bannerUrl:
+            storefront.bannerUrl ||
+            "",
+
+          createdAt:
+            storefront.createdAt ||
+            null,
+
+          updatedAt:
+            storefront.updatedAt ||
+            null,
+        },
+
+        listings:
+          sellerListings,
+
+        listingCount:
+          sellerListings.length,
+      });
+    } catch (error) {
+      console.error(
+        "Admin reseller website inspection error:",
+        error
+      );
+
+      return res.status(500).json({
+        error:
+          error.message ||
+          "Unable to inspect reseller website",
+      });
+    }
+  }
+);
+
+// ============================================================
 // ADMIN — UNFREEZE SELLER AFTER PAYMENT CONFIRMATION
 // ============================================================
 //
