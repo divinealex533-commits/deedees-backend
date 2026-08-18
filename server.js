@@ -4176,6 +4176,225 @@ app.get(
 );
 
 // ============================================================
+// PUBLIC SELLER MARKETPLACE
+// ============================================================
+
+// Public seller storefronts
+app.get(
+  "/api/marketplace/sellers",
+  async (req, res) => {
+    try {
+      const [storefronts, users] =
+        await Promise.all([
+          db.sellerStorefronts.all(),
+          db.users.all(),
+        ]);
+
+      const sellers = storefronts
+        .map((storefront) => {
+          const seller = users.find(
+            (user) =>
+              String(user.id) ===
+              String(storefront.ownerId)
+          );
+
+          if (!seller) {
+            return null;
+          }
+
+          if (seller.isSeller !== true) {
+            return null;
+          }
+
+          if (
+            seller.sellerPlanStatus &&
+            seller.sellerPlanStatus !== "active"
+          ) {
+            return null;
+          }
+
+          if (seller.sellerFrozenAt) {
+            return null;
+          }
+
+          return {
+            id: storefront.id,
+            ownerId: storefront.ownerId,
+            storeName:
+              storefront.storeName ||
+              seller.sellerStoreName ||
+              "",
+            slug:
+              storefront.slug ||
+              seller.sellerStoreSlug ||
+              "",
+            description:
+              storefront.description ||
+              seller.sellerDescription ||
+              "",
+            logoUrl:
+              storefront.logoUrl ||
+              seller.sellerLogoUrl ||
+              "",
+            bannerUrl:
+              storefront.bannerUrl ||
+              "",
+            createdAt:
+              storefront.createdAt,
+            updatedAt:
+              storefront.updatedAt,
+          };
+        })
+        .filter(Boolean);
+
+      res.json(sellers);
+    } catch (error) {
+      console.error(
+        "GET /api/marketplace/sellers failed:",
+        error
+      );
+
+      res.status(500).json({
+        error:
+          error.message ||
+          "Failed to load public seller marketplace",
+      });
+    }
+  }
+);
+
+// Public seller listings
+app.get(
+  "/api/marketplace/listings",
+  async (req, res) => {
+    try {
+      const [items, storefronts, users] =
+        await Promise.all([
+          db.items.all(),
+          db.sellerStorefronts.all(),
+          db.users.all(),
+        ]);
+
+      const listings = items
+        .filter(
+          (item) =>
+            item.ownerType === "seller" &&
+            item.ownerId
+        )
+        .map((item) => {
+          const seller = users.find(
+            (user) =>
+              String(user.id) ===
+              String(item.ownerId)
+          );
+
+          if (!seller) {
+            return null;
+          }
+
+          if (seller.isSeller !== true) {
+            return null;
+          }
+
+          if (
+            seller.sellerPlanStatus &&
+            seller.sellerPlanStatus !== "active"
+          ) {
+            return null;
+          }
+
+          if (seller.sellerFrozenAt) {
+            return null;
+          }
+
+          const storefront =
+            storefronts.find(
+              (store) =>
+                String(store.ownerId) ===
+                String(item.ownerId)
+            );
+
+          return {
+            ...publicItem(item),
+
+            seller: {
+              id: seller.id,
+              storeName:
+                storefront?.storeName ||
+                seller.sellerStoreName ||
+                "",
+              slug:
+                storefront?.slug ||
+                seller.sellerStoreSlug ||
+                "",
+              description:
+                storefront?.description ||
+                seller.sellerDescription ||
+                "",
+              logoUrl:
+                storefront?.logoUrl ||
+                seller.sellerLogoUrl ||
+                "",
+            },
+          };
+        })
+        .filter(Boolean);
+
+      res.json(listings);
+    } catch (error) {
+      console.error(
+        "GET /api/marketplace/listings failed:",
+        error
+      );
+
+      res.status(500).json({
+        error:
+          error.message ||
+          "Failed to load public seller listings",
+      });
+    }
+  }
+);
+
+// Public seller storefront by slug
+app.get(
+  "/api/marketplace/storefront/:slug",
+  async (req, res) => {
+    try {
+      const storefronts =
+        await db.sellerStorefronts.all();
+
+      const storefront =
+        storefronts.find(
+          (store) =>
+            String(store.slug) ===
+            String(req.params.slug)
+        );
+
+      if (!storefront) {
+        return res.status(404).json({
+          error:
+            "Seller storefront not found",
+        });
+      }
+
+      res.json(storefront);
+    } catch (error) {
+      console.error(
+        "GET /api/marketplace/storefront/:slug failed:",
+        error
+      );
+
+      res.status(500).json({
+        error:
+          error.message ||
+          "Failed to load public seller storefront",
+      });
+    }
+  }
+);
+
+// ============================================================
 // ADD CREDENTIALS
 // ============================================================
 
