@@ -3159,7 +3159,7 @@ app.get(
         storefronts.push(storefront);
 
         await db.sellerStorefronts.save(storefronts);
-      }
+      
 
       if (!storefront) {
         return res.status(404).json({
@@ -3210,7 +3210,7 @@ app.post(
       }
 
       const storefronts =
-        await db.sellerStorefronts.save(storefronts);
+  await db.sellerStorefronts.all();
 
       const existing =
         storefronts.find(
@@ -3251,7 +3251,7 @@ app.post(
 
       storefronts.push(storefront);
 
-      await db.sellerStorefronts.save(storefronts);
+     await db.sellerStorefronts.save(storefronts);
 
       res.status(201).json(storefront);
     } catch (error) {
@@ -3283,7 +3283,7 @@ app.put(
       }
 
       const storefronts =
-        await db.sellerStorefronts.save(storefronts);
+  await db.sellerStorefronts.all();
 
       const storefront =
         storefronts.find(
@@ -3321,7 +3321,7 @@ app.put(
         new Date().toISOString();
 
       await db.sellerStorefronts.save(storefronts);
-      );
+      
 
       res.json(storefront);
     } catch (error) {
