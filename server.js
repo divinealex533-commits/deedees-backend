@@ -3121,7 +3121,7 @@ app.get(
       }
 
       const storefronts =
-        await db.seller_storefronts.all();
+  await db.sellerStorefronts.all();
 
       let storefront =
         storefronts.find(
