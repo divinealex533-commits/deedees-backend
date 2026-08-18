@@ -3376,6 +3376,436 @@ app.get(
 );
 
 // ============================================================
+// SELLER LISTINGS
+// ============================================================
+
+app.get(
+  "/api/seller/listings",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const users = await db.users.all();
+
+      const user = users.find(
+        (u) => u.id === req.user.id
+      );
+
+      if (!user) {
+        return res.status(404).json({
+          error: "User not found",
+        });
+      }
+
+      const listings =
+        await db.items.all();
+
+      const sellerListings =
+        listings.filter(
+          (item) =>
+            item.sellerId === user.id ||
+            item.userId === user.id
+        );
+
+      return res.json(sellerListings);
+    } catch (error) {
+      console.error(
+        "Seller listings error:",
+        error
+      );
+
+      return res.status(500).json({
+        error:
+          error.message ||
+          "Unable to load seller listings",
+      });
+    }
+  }
+);
+
+app.post(
+  "/api/seller/listings",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const {
+        title,
+        description = "",
+        price,
+        imageUrl = "",
+        categoryId = null,
+        quantity = null,
+        accessLinks = [],
+        tonyixProductId = null,
+      } = req.body;
+
+      if (!title) {
+        return res.status(400).json({
+          error: "Title is required",
+        });
+      }
+
+      const numericPrice =
+        Number(price);
+
+      if (
+        !Number.isFinite(numericPrice) ||
+        numericPrice < 0
+      ) {
+        return res.status(400).json({
+          error: "Valid price is required",
+        });
+      }
+
+      const users =
+        await db.users.all();
+
+      const user = users.find(
+        (u) => u.id === req.user.id
+      );
+
+      if (!user) {
+        return res.status(404).json({
+          error: "User not found",
+        });
+      }
+
+      const items =
+        await db.items.all();
+
+      const listing = {
+        id: crypto.randomUUID(),
+
+        name: String(title).trim(),
+
+        title: String(title).trim(),
+
+        description:
+          String(description || ""),
+
+        price: numericPrice,
+
+        imageUrl:
+          String(imageUrl || ""),
+
+        categoryId,
+
+        sellerId: user.id,
+
+        userId: user.id,
+
+        sellerEmail:
+          user.email || "",
+
+        sellerName:
+          user.name || "",
+
+        accessLinks:
+          Array.isArray(accessLinks)
+            ? accessLinks
+            : [],
+
+        quantity:
+          quantity == null
+            ? null
+            : Number(quantity),
+
+        inStock:
+          Array.isArray(accessLinks) &&
+          accessLinks.length > 0
+            ? true
+            : quantity == null
+            ? true
+            : Number(quantity) > 0,
+
+        tonyixProductId:
+          tonyixProductId == null
+            ? null
+            : Number(tonyixProductId),
+
+        sellerStoreSlug:
+          user.sellerStoreSlug || "",
+
+        sellerStoreName:
+          user.sellerStoreName || "",
+
+        createdAt:
+          new Date().toISOString(),
+
+        updatedAt:
+          new Date().toISOString(),
+      };
+
+      items.push(listing);
+
+      await db.items.save(items);
+
+      return res.status(201).json(listing);
+    } catch (error) {
+      console.error(
+        "Create seller listing error:",
+        error
+      );
+
+      return res.status(500).json({
+        error:
+          error.message ||
+          "Unable to create seller listing",
+      });
+    }
+  }
+);
+
+app.put(
+  "/api/seller/listings/:id",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const items =
+        await db.items.all();
+
+      const listing =
+        items.find(
+          (item) =>
+            item.id === req.params.id &&
+            (
+              item.sellerId === req.user.id ||
+              item.userId === req.user.id
+            )
+        );
+
+      if (!listing) {
+        return res.status(404).json({
+          error: "Seller listing not found",
+        });
+      }
+
+      const allowedFields = [
+        "title",
+        "name",
+        "description",
+        "price",
+        "imageUrl",
+        "categoryId",
+        "quantity",
+        "accessLinks",
+        "inStock",
+      ];
+
+      for (const field of allowedFields) {
+        if (
+          req.body[field] !== undefined
+        ) {
+          listing[field] =
+            req.body[field];
+        }
+      }
+
+      if (
+        req.body.title !== undefined
+      ) {
+        listing.name =
+          req.body.title;
+      }
+
+      if (
+        req.body.name !== undefined
+      ) {
+        listing.title =
+          req.body.name;
+      }
+
+      listing.updatedAt =
+        new Date().toISOString();
+
+      await db.items.save(items);
+
+      return res.json(listing);
+    } catch (error) {
+      console.error(
+        "Update seller listing error:",
+        error
+      );
+
+      return res.status(500).json({
+        error:
+          error.message ||
+          "Unable to update seller listing",
+      });
+    }
+  }
+);
+
+app.delete(
+  "/api/seller/listings/:id",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const items =
+        await db.items.all();
+
+      const index =
+        items.findIndex(
+          (item) =>
+            item.id === req.params.id &&
+            (
+              item.sellerId === req.user.id ||
+              item.userId === req.user.id
+            )
+        );
+
+      if (index === -1) {
+        return res.status(404).json({
+          error: "Seller listing not found",
+        });
+      }
+
+      items.splice(index, 1);
+
+      await db.items.save(items);
+
+      return res.json({
+        success: true,
+      });
+    } catch (error) {
+      console.error(
+        "Delete seller listing error:",
+        error
+      );
+
+      return res.status(500).json({
+        error:
+          error.message ||
+          "Unable to delete seller listing",
+      });
+    }
+  }
+);
+
+app.post(
+  "/api/seller/listings/:id/toggle",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const items =
+        await db.items.all();
+
+      const listing =
+        items.find(
+          (item) =>
+            item.id === req.params.id &&
+            (
+              item.sellerId === req.user.id ||
+              item.userId === req.user.id
+            )
+        );
+
+      if (!listing) {
+        return res.status(404).json({
+          error: "Seller listing not found",
+        });
+      }
+
+      listing.inStock =
+        !Boolean(listing.inStock);
+
+      listing.updatedAt =
+        new Date().toISOString();
+
+      await db.items.save(items);
+
+      return res.json(listing);
+    } catch (error) {
+      console.error(
+        "Toggle seller listing error:",
+        error
+      );
+
+      return res.status(500).json({
+        error:
+          error.message ||
+          "Unable to toggle seller listing",
+      });
+    }
+  }
+);
+
+app.post(
+  "/api/seller/listings/:id/add-access-links",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const { credentials } =
+        req.body;
+
+      if (
+        !Array.isArray(credentials)
+      ) {
+        return res.status(400).json({
+          error:
+            "credentials must be an array",
+        });
+      }
+
+      const items =
+        await db.items.all();
+
+      const listing =
+        items.find(
+          (item) =>
+            item.id === req.params.id &&
+            (
+              item.sellerId === req.user.id ||
+              item.userId === req.user.id
+            )
+        );
+
+      if (!listing) {
+        return res.status(404).json({
+          error: "Seller listing not found",
+        });
+      }
+
+      if (
+        !Array.isArray(
+          listing.accessLinks
+        )
+      ) {
+        listing.accessLinks = [];
+      }
+
+      listing.accessLinks.push(
+        ...credentials
+          .map((value) =>
+            String(value).trim()
+          )
+          .filter(Boolean)
+      );
+
+      listing.inStock =
+        listing.accessLinks.length > 0;
+
+      listing.updatedAt =
+        new Date().toISOString();
+
+      await db.items.save(items);
+
+      return res.json(listing);
+    } catch (error) {
+      console.error(
+        "Add seller credentials error:",
+        error
+      );
+
+      return res.status(500).json({
+        error:
+          error.message ||
+          "Unable to add seller credentials",
+      });
+    }
+  }
+);
+
+// ============================================================
 // SELLER — CREATE OWN PRODUCT
 // ============================================================
 app.post(
