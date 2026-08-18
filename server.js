@@ -7274,6 +7274,156 @@ app.get(
 );
 
 // ============================================================
+// ADMIN — REAL RESELLER WEBSITE INSPECTION
+// ============================================================
+//
+// This is an ADMIN-ONLY inspection endpoint.
+//
+// IMPORTANT:
+// - Includes real reseller accounts even when inactive,
+//   expired, or frozen.
+// - Excludes admin test-mode sellers.
+// - Does NOT activate a seller subscription.
+// - Does NOT initialize Paystack.
+// - Does NOT modify the reseller account.
+// - This endpoint is for inspecting the reseller website only.
+// ============================================================
+
+app.get(
+  "/api/admin/reseller-inspection/sellers",
+  requireAuth,
+  requireAdmin,
+  async (req, res) => {
+    try {
+      const [
+        users,
+        storefronts,
+        items,
+      ] = await Promise.all([
+        db.users.all(),
+        db.sellerStorefronts.all(),
+        db.items.all(),
+      ]);
+
+      const sellers = users
+        .filter(
+          (user) =>
+            user?.isSeller === true &&
+            user?.sellerTestMode !== true
+        )
+        .map((user) => {
+          const storefront =
+            storefronts.find(
+              (store) =>
+                String(
+                  store.ownerId
+                ) ===
+                String(user.id)
+            );
+
+          const sellerListings =
+            items.filter(
+              (item) =>
+                item.ownerType ===
+                  "seller" &&
+                String(
+                  item.ownerId
+                ) ===
+                  String(user.id)
+            );
+
+          const plan =
+            getSellerPlan(user);
+
+          return {
+            id: user.id,
+
+            name:
+              user.name || "",
+
+            email:
+              user.email || "",
+
+            isSeller:
+              user.isSeller === true,
+
+            sellerTestMode:
+              user.sellerTestMode === true,
+
+            sellerPlan: plan
+              ? {
+                  id: plan.id,
+                  name: plan.name,
+                  billing:
+                    plan.billing,
+                }
+              : null,
+
+            sellerPlanStatus:
+              user.sellerPlanStatus ||
+              "inactive",
+
+            sellerPlanExpiresAt:
+              user.sellerPlanExpiresAt ||
+              null,
+
+            sellerFrozenAt:
+              user.sellerFrozenAt ||
+              null,
+
+            sellerFreezeReason:
+              user.sellerFreezeReason ||
+              "",
+
+            sellerStoreName:
+              storefront?.storeName ||
+              user.sellerStoreName ||
+              "",
+
+            sellerStoreSlug:
+              storefront?.slug ||
+              user.sellerStoreSlug ||
+              "",
+
+            sellerDescription:
+              storefront?.description ||
+              user.sellerDescription ||
+              "",
+
+            sellerLogoUrl:
+              storefront?.logoUrl ||
+              user.sellerLogoUrl ||
+              "",
+
+            sellerBannerUrl:
+              storefront?.bannerUrl ||
+              "",
+
+            listingCount:
+              sellerListings.length,
+          };
+        });
+
+      return res.json({
+        sellers,
+        count: sellers.length,
+      });
+    } catch (error) {
+      console.error(
+        "Admin reseller inspection sellers error:",
+        error
+      );
+
+      return res.status(500).json({
+        error:
+          error.message ||
+          "Unable to load real reseller inspection list",
+      });
+    }
+  }
+);
+
+// ============================================================
 // ADMIN — UNFREEZE SELLER AFTER PAYMENT CONFIRMATION
 // ============================================================
 //
