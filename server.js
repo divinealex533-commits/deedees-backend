@@ -4056,6 +4056,86 @@ app.post(
 );
 
 // ============================================================
+// SELLER — ORDERS
+// ============================================================
+
+app.get(
+  "/api/seller/orders",
+  requireAuth,
+  requireSellerAccess,
+  async (req, res) => {
+    try {
+      const orders = await db.sellerOrders.all();
+
+      const myOrders = orders.filter(
+        (order) =>
+          String(
+            order.sellerId ??
+            order.ownerId ??
+            order.sellerUserId ??
+            ""
+          ) === String(req.user.id)
+      );
+
+      res.json(myOrders);
+    } catch (error) {
+      console.error(
+        "GET /api/seller/orders failed:",
+        error
+      );
+
+      res.status(500).json({
+        error:
+          error.message ||
+          "Failed to load seller orders",
+      });
+    }
+  }
+);
+
+app.get(
+  "/api/seller/orders/:id",
+  requireAuth,
+  requireSellerAccess,
+  async (req, res) => {
+    try {
+      const orders = await db.sellerOrders.all();
+
+      const order = orders.find(
+        (item) =>
+          String(item.id) ===
+            String(req.params.id) &&
+          String(
+            item.sellerId ??
+            item.ownerId ??
+            item.sellerUserId ??
+            ""
+          ) === String(req.user.id)
+      );
+
+      if (!order) {
+        return res.status(404).json({
+          error: "Seller order not found",
+        });
+      }
+
+      res.json(order);
+    } catch (error) {
+      console.error(
+        "GET /api/seller/orders/:id failed:",
+        error
+      );
+
+      res.status(500).json({
+        error:
+          error.message ||
+          "Failed to load seller order",
+      });
+    }
+  }
+);
+
+// ============================================================
 // ADD CREDENTIALS
 // ============================================================
 
