@@ -4136,6 +4136,46 @@ app.get(
 );
 
 // ============================================================
+// SELLER — WITHDRAWALS
+// ============================================================
+
+app.get(
+  "/api/seller/withdrawals",
+  requireAuth,
+  requireSellerAccess,
+  async (req, res) => {
+    try {
+      const withdrawals =
+        await db.sellerWithdrawals.all();
+
+      const myWithdrawals =
+        withdrawals.filter(
+          (withdrawal) =>
+            String(
+              withdrawal.sellerId ??
+              withdrawal.ownerId ??
+              withdrawal.userId ??
+              ""
+            ) === String(req.user.id)
+        );
+
+      res.json(myWithdrawals);
+    } catch (error) {
+      console.error(
+        "GET /api/seller/withdrawals failed:",
+        error
+      );
+
+      res.status(500).json({
+        error:
+          error.message ||
+          "Failed to load seller withdrawals",
+      });
+    }
+  }
+);
+
+// ============================================================
 // ADD CREDENTIALS
 // ============================================================
 
