@@ -3159,7 +3159,6 @@ app.get(
         storefronts.push(storefront);
 
         await db.sellerStorefronts.save(storefronts);
-        );
       }
 
       if (!storefront) {
