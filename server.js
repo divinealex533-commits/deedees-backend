@@ -3806,6 +3806,414 @@ app.post(
 );
 
 // ============================================================
+// SELLER MARKETPLACE PURCHASE
+// ============================================================
+
+app.post(
+  "/api/marketplace/listings/:id/purchase",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const { quantity } = req.body || {};
+
+      const qty =
+        quantity == null
+          ? 1
+          : Number(quantity);
+
+      if (
+        !Number.isInteger(qty) ||
+        qty < 1
+      ) {
+        return res.status(400).json({
+          error:
+            "Quantity must be a positive whole number",
+        });
+      }
+
+      const [items, users, orders] =
+        await Promise.all([
+          db.items.all(),
+          db.users.all(),
+          db.sellerOrders.all(),
+        ]);
+
+      const listing = items.find(
+        (item) =>
+          String(item.id) ===
+            String(req.params.id) &&
+          (
+            item.ownerType ===
+              "seller" ||
+            item.sellerId != null ||
+            item.userId != null
+          )
+      );
+
+      if (!listing) {
+        return res.status(404).json({
+          error:
+            "Seller listing not found",
+        });
+      }
+
+      const sellerId =
+        listing.sellerId ??
+        listing.ownerId ??
+        listing.userId ??
+        null;
+
+      if (!sellerId) {
+        return res.status(400).json({
+          error:
+            "Seller could not be identified",
+        });
+      }
+
+      if (
+        String(sellerId) ===
+        String(req.user.id)
+      ) {
+        return res.status(400).json({
+          error:
+            "You cannot purchase your own listing",
+        });
+      }
+
+      const seller = users.find(
+        (user) =>
+          String(user.id) ===
+          String(sellerId)
+      );
+
+      if (!seller) {
+        return res.status(404).json({
+          error:
+            "Seller account not found",
+        });
+      }
+
+      if (
+        seller.sellerFrozenAt ||
+        seller.sellerPlanStatus ===
+          "frozen"
+      ) {
+        return res.status(403).json({
+          error:
+            "This seller is currently unavailable",
+        });
+      }
+
+      if (
+        listing.inStock === false
+      ) {
+        return res.status(400).json({
+          error:
+            "This seller product is out of stock",
+        });
+      }
+
+      const unitPrice =
+        Number(listing.price);
+
+      if (
+        !Number.isFinite(unitPrice) ||
+        unitPrice <= 0
+      ) {
+        return res.status(400).json({
+          error:
+            "Invalid seller listing price",
+        });
+      }
+
+      const totalAmount =
+        unitPrice * qty;
+
+      const buyer = users.find(
+        (user) =>
+          String(user.id) ===
+          String(req.user.id)
+      );
+
+      if (!buyer) {
+        return res.status(404).json({
+          error:
+            "Buyer account not found",
+        });
+      }
+
+      const walletBalance =
+        Number(
+          buyer.walletBalance || 0
+        );
+
+      if (
+        walletBalance <
+        totalAmount
+      ) {
+        return res.status(400).json({
+          error:
+            "Insufficient wallet balance",
+          required: totalAmount,
+          walletBalance,
+        });
+      }
+
+      // --------------------------------------------------------
+      // CHECK STOCK
+      // --------------------------------------------------------
+
+      let availableQty;
+
+      if (
+        Array.isArray(
+          listing.accessLinks
+        )
+      ) {
+        availableQty =
+          listing.accessLinks.length;
+      } else if (
+        listing.quantity != null
+      ) {
+        availableQty = Math.max(
+          0,
+          Number(
+            listing.quantity
+          )
+        );
+      } else {
+        availableQty = 1;
+      }
+
+      if (
+        availableQty < qty
+      ) {
+        return res.status(400).json({
+          error:
+            `Only ${availableQty} left in stock`,
+        });
+      }
+
+      // --------------------------------------------------------
+      // DELIVER ACCESS
+      // --------------------------------------------------------
+
+      const deliveredCredentials =
+        [];
+
+      if (
+        Array.isArray(
+          listing.accessLinks
+        )
+      ) {
+        deliveredCredentials.push(
+          ...listing.accessLinks.splice(
+            0,
+            qty
+          )
+        );
+
+        listing.quantity =
+          listing.accessLinks.length;
+
+        listing.inStock =
+          listing.accessLinks.length >
+          0;
+      } else if (
+        listing.quantity != null
+      ) {
+        listing.quantity =
+          Math.max(
+            0,
+            Number(
+              listing.quantity
+            ) - qty
+          );
+
+        listing.inStock =
+          listing.quantity > 0;
+
+        if (
+          listing.accessLink
+        ) {
+          deliveredCredentials.push(
+            ...Array(qty).fill(
+              listing.accessLink
+            )
+          );
+        }
+      } else if (
+        listing.accessLink
+      ) {
+        deliveredCredentials.push(
+          listing.accessLink
+        );
+
+        listing.inStock =
+          false;
+
+        listing.sold = true;
+      } else {
+        listing.inStock =
+          false;
+
+        listing.sold = true;
+      }
+
+      // --------------------------------------------------------
+      // PLATFORM FEE / SELLER EARNINGS
+      // --------------------------------------------------------
+
+      const platformFee =
+        Math.round(
+          totalAmount * 0.10
+        );
+
+      const sellerAmount =
+        totalAmount -
+        platformFee;
+
+      // --------------------------------------------------------
+      // DEDUCT BUYER WALLET
+      // --------------------------------------------------------
+
+      buyer.walletBalance =
+        walletBalance -
+        totalAmount;
+
+      // --------------------------------------------------------
+      // CREATE SELLER ORDER
+      // --------------------------------------------------------
+
+      const orderId =
+        crypto.randomUUID();
+
+      orders.push({
+        id: orderId,
+
+        listingId:
+          listing.id,
+
+        itemId:
+          listing.id,
+
+        sellerId,
+
+        buyerId:
+          buyer.id,
+
+        buyerName:
+          buyer.name || "",
+
+        buyerEmail:
+          buyer.email || "",
+
+        productName:
+          listing.name ||
+          listing.title ||
+          "Seller Product",
+
+        title:
+          listing.title ||
+          listing.name ||
+          "Seller Product",
+
+        price:
+          unitPrice,
+
+        quantity:
+          qty,
+
+        totalAmount,
+
+        platformFee,
+
+        sellerAmount,
+
+        status:
+          "completed",
+
+        assignedCredentials:
+          deliveredCredentials,
+
+        createdAt:
+          new Date().toISOString(),
+      });
+
+      listing.updatedAt =
+        new Date().toISOString();
+
+      // --------------------------------------------------------
+      // SAVE
+      // --------------------------------------------------------
+
+      await db.users.save(
+        users
+      );
+
+      await db.items.save(
+        items
+      );
+
+      await db.sellerOrders.save(
+        orders
+      );
+
+      return res.json({
+        message:
+          "Seller product purchase successful",
+
+        orderId,
+
+        item: {
+          id:
+            listing.id,
+
+          name:
+            listing.name ||
+            listing.title,
+
+          title:
+            listing.title ||
+            listing.name,
+
+          price:
+            unitPrice,
+
+          quantity:
+            qty,
+
+          assignedCredentials:
+            deliveredCredentials,
+
+          accessLink:
+            deliveredCredentials[0] ||
+            null,
+        },
+
+        newBalance:
+          buyer.walletBalance,
+
+        sellerAmount,
+
+        platformFee,
+      });
+    } catch (error) {
+      console.error(
+        "Seller marketplace purchase failed:",
+        error
+      );
+
+      return res.status(500).json({
+        error:
+          error?.message ||
+          "Unable to complete seller marketplace purchase",
+      });
+    }
+  }
+);
+
+// ============================================================
 // SELLER — CREATE OWN PRODUCT
 // ============================================================
 app.post(
