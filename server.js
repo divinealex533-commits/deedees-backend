@@ -7689,11 +7689,10 @@ app.get(
       ]);
 
       const sellers = users
-        .filter(
-          (user) =>
-            user?.isSeller === true &&
-            user?.sellerTestMode !== true
-        )
+      .filter(
+  (user) =>
+    user?.isSeller === true
+)
         .map((user) => {
           const storefront =
             storefronts.find(
