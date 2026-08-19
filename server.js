@@ -2782,6 +2782,389 @@ app.put(
 );
 
 // ============================================================
+// SELLER LISTINGS
+// ============================================================
+
+app.get(
+  "/api/seller/listings",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const items = await db.items.all();
+
+      const listings = items.filter(
+        (item) =>
+          item.sellerId === req.user.id
+      );
+
+      res.json({
+        listings,
+      });
+    } catch (error) {
+      console.error(
+        "Get seller listings error:",
+        error
+      );
+
+      res.status(500).json({
+        error: "Failed to load seller listings",
+      });
+    }
+  }
+);
+
+app.post(
+  "/api/seller/listings",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const user = req.user;
+
+      if (!user.isSeller) {
+        return res.status(403).json({
+          error: "Seller account required",
+        });
+      }
+
+      const {
+        title,
+        description = "",
+        price,
+        imageUrl = "",
+        categoryId = null,
+        quantity = 1,
+        accessLinks = [],
+        tonyixProductId = null,
+      } = req.body;
+
+      if (!title) {
+        return res.status(400).json({
+          error: "Title is required",
+        });
+      }
+
+      if (
+        price === undefined ||
+        Number(price) < 0
+      ) {
+        return res.status(400).json({
+          error: "Valid price is required",
+        });
+      }
+
+      const items = await db.items.all();
+
+      const listing = {
+        id: crypto.randomUUID(),
+        sellerId: user.id,
+
+        name: title,
+        title,
+
+        description,
+
+        price: Number(price),
+
+        imageUrl,
+
+        categoryId,
+
+        quantity:
+          quantity == null
+            ? null
+            : Number(quantity),
+
+        accessLinks:
+          Array.isArray(accessLinks)
+            ? accessLinks
+            : [],
+
+        tonyixProductId:
+          tonyixProductId == null
+            ? null
+            : Number(tonyixProductId),
+
+        inStock:
+          Array.isArray(accessLinks)
+            ? accessLinks.length > 0
+            : Number(quantity || 0) > 0,
+
+        createdAt:
+          new Date().toISOString(),
+      };
+
+      items.push(listing);
+
+      await db.items.save(items);
+
+      res.status(201).json({
+        listing,
+      });
+    } catch (error) {
+      console.error(
+        "Create seller listing error:",
+        error
+      );
+
+      res.status(500).json({
+        error: "Failed to create listing",
+      });
+    }
+  }
+);
+
+app.put(
+  "/api/seller/listings/:id",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const items = await db.items.all();
+
+      const listing = items.find(
+        (item) =>
+          item.id === req.params.id &&
+          item.sellerId === req.user.id
+      );
+
+      if (!listing) {
+        return res.status(404).json({
+          error: "Listing not found",
+        });
+      }
+
+      const updates = req.body || {};
+
+      if (
+        updates.title !== undefined
+      ) {
+        listing.title = updates.title;
+        listing.name = updates.title;
+      }
+
+      if (
+        updates.description !== undefined
+      ) {
+        listing.description =
+          updates.description;
+      }
+
+      if (
+        updates.price !== undefined
+      ) {
+        listing.price =
+          Number(updates.price);
+      }
+
+      if (
+        updates.imageUrl !== undefined
+      ) {
+        listing.imageUrl =
+          updates.imageUrl;
+      }
+
+      if (
+        updates.categoryId !== undefined
+      ) {
+        listing.categoryId =
+          updates.categoryId;
+      }
+
+      if (
+        updates.quantity !== undefined
+      ) {
+        listing.quantity =
+          Number(updates.quantity);
+      }
+
+      if (
+        updates.accessLinks !== undefined &&
+        Array.isArray(updates.accessLinks)
+      ) {
+        listing.accessLinks =
+          updates.accessLinks;
+      }
+
+      if (
+        updates.inStock !== undefined
+      ) {
+        listing.inStock =
+          Boolean(updates.inStock);
+      }
+
+      listing.updatedAt =
+        new Date().toISOString();
+
+      await db.items.save(items);
+
+      res.json({
+        listing,
+      });
+    } catch (error) {
+      console.error(
+        "Update seller listing error:",
+        error
+      );
+
+      res.status(500).json({
+        error: "Failed to update listing",
+      });
+    }
+  }
+);
+
+app.delete(
+  "/api/seller/listings/:id",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const items = await db.items.all();
+
+      const index = items.findIndex(
+        (item) =>
+          item.id === req.params.id &&
+          item.sellerId === req.user.id
+      );
+
+      if (index === -1) {
+        return res.status(404).json({
+          error: "Listing not found",
+        });
+      }
+
+      items.splice(index, 1);
+
+      await db.items.save(items);
+
+      res.json({
+        success: true,
+      });
+    } catch (error) {
+      console.error(
+        "Delete seller listing error:",
+        error
+      );
+
+      res.status(500).json({
+        error: "Failed to delete listing",
+      });
+    }
+  }
+);
+
+app.post(
+  "/api/seller/listings/:id/toggle",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const items = await db.items.all();
+
+      const listing = items.find(
+        (item) =>
+          item.id === req.params.id &&
+          item.sellerId === req.user.id
+      );
+
+      if (!listing) {
+        return res.status(404).json({
+          error: "Listing not found",
+        });
+      }
+
+      listing.inStock =
+        !Boolean(listing.inStock);
+
+      listing.updatedAt =
+        new Date().toISOString();
+
+      await db.items.save(items);
+
+      res.json({
+        listing,
+      });
+    } catch (error) {
+      console.error(
+        "Toggle seller listing error:",
+        error
+      );
+
+      res.status(500).json({
+        error: "Failed to toggle listing",
+      });
+    }
+  }
+);
+
+app.post(
+  "/api/seller/listings/:id/add-access-links",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const {
+        credentials,
+      } = req.body;
+
+      if (
+        !Array.isArray(credentials) ||
+        credentials.length === 0
+      ) {
+        return res.status(400).json({
+          error:
+            "Credentials must be a non-empty array",
+        });
+      }
+
+      const items = await db.items.all();
+
+      const listing = items.find(
+        (item) =>
+          item.id === req.params.id &&
+          item.sellerId === req.user.id
+      );
+
+      if (!listing) {
+        return res.status(404).json({
+          error: "Listing not found",
+        });
+      }
+
+      if (
+        !Array.isArray(
+          listing.accessLinks
+        )
+      ) {
+        listing.accessLinks = [];
+      }
+
+      listing.accessLinks.push(
+        ...credentials
+      );
+
+      listing.quantity = null;
+      listing.inStock = true;
+
+      listing.updatedAt =
+        new Date().toISOString();
+
+      await db.items.save(items);
+
+      res.json({
+        listing,
+      });
+    } catch (error) {
+      console.error(
+        "Add seller credentials error:",
+        error
+      );
+
+      res.status(500).json({
+        error:
+          "Failed to add access links",
+      });
+    }
+  }
+);
+
+// ============================================================
 // ADMIN — GET ALL RESELLER ACCOUNTS
 // Used by the Reseller System Diagnostic & Control Center.
 // ============================================================
