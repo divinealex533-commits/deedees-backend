@@ -7451,14 +7451,28 @@ app.get(
         String(req.params.sellerId);
 
       const [
-        users,
-        storefronts,
-        items,
-      ] = await Promise.all([
-        db.users.all(),
-        db.sellerStorefronts.all(),
-        db.items.all(),
-      ]);
+  users,
+  storefronts,
+  items,
+  subscriptions,
+] = await Promise.all([
+  db.users.all(),
+  db.sellerStorefronts.all(),
+  db.items.all(),
+  db.sellerSubscriptions.all(),
+]);
+
+const realSellerIds = new Set([
+  ...storefronts
+    .map((store) => store?.ownerId)
+    .filter(Boolean)
+    .map((id) => String(id)),
+
+  ...subscriptions
+    .map((subscription) => subscription?.userId)
+    .filter(Boolean)
+    .map((id) => String(id)),
+]);
 
       const seller =
         users.find(
@@ -7498,17 +7512,17 @@ app.get(
         });
       }
 
-      const sellerListings =
-        items
-          .filter(
-            (item) =>
-              String(
-                item.ownerId ??
-                item.sellerId ??
-                item.userId ??
-                ""
-              ) === sellerId
-          )
+      const sellers = users
+  .filter(
+    (user) =>
+      user?.sellerTestMode !== true &&
+      (
+        user?.isSeller === true ||
+        realSellerIds.has(
+          String(user?.id)
+        )
+      )
+  )
           .map((item) => {
             let stockCount = 0;
 
