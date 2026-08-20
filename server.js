@@ -2782,6 +2782,274 @@ app.put(
 );
 
 // ============================================================
+// SELLER CATEGORIES
+// ============================================================
+
+app.get(
+  "/api/seller/categories",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const categories = await db.categories.all();
+
+      const sellerCategories = categories.filter(
+        (category) =>
+          category.sellerId === req.user.id
+      );
+
+      res.json({
+        categories: sellerCategories,
+      });
+    } catch (error) {
+      console.error(
+        "Get seller categories error:",
+        error
+      );
+
+      res.status(500).json({
+        error: "Failed to load seller categories",
+      });
+    }
+  }
+);
+
+app.post(
+  "/api/seller/categories",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const user = req.user;
+
+      if (!user.isSeller) {
+        return res.status(403).json({
+          error: "Seller account required",
+        });
+      }
+
+      const {
+        name,
+        description = "",
+      } = req.body || {};
+
+      const categoryName =
+        String(name || "").trim();
+
+      if (!categoryName) {
+        return res.status(400).json({
+          error: "Category name is required",
+        });
+      }
+
+      const categories =
+        await db.categories.all();
+
+      const duplicate =
+        categories.find(
+          (category) =>
+            category.sellerId === user.id &&
+            String(category.name || "")
+              .trim()
+              .toLowerCase() ===
+              categoryName.toLowerCase()
+        );
+
+      if (duplicate) {
+        return res.status(409).json({
+          error: "You already have a category with this name",
+        });
+      }
+
+      const category = {
+        id: crypto.randomUUID(),
+
+        sellerId: user.id,
+
+        name: categoryName,
+
+        description:
+          String(description || "").trim(),
+
+        createdAt:
+          new Date().toISOString(),
+
+        updatedAt:
+          new Date().toISOString(),
+      };
+
+      categories.push(category);
+
+      await db.categories.save(categories);
+
+      res.status(201).json({
+        category,
+      });
+    } catch (error) {
+      console.error(
+        "Create seller category error:",
+        error
+      );
+
+      res.status(500).json({
+        error: "Failed to create seller category",
+      });
+    }
+  }
+);
+
+app.put(
+  "/api/seller/categories/:id",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const categories =
+        await db.categories.all();
+
+      const category =
+        categories.find(
+          (item) =>
+            item.id === req.params.id &&
+            item.sellerId === req.user.id
+        );
+
+      if (!category) {
+        return res.status(404).json({
+          error: "Category not found",
+        });
+      }
+
+      const {
+        name,
+        description,
+      } = req.body || {};
+
+      if (name !== undefined) {
+        const categoryName =
+          String(name || "").trim();
+
+        if (!categoryName) {
+          return res.status(400).json({
+            error: "Category name is required",
+          });
+        }
+
+        const duplicate =
+          categories.find(
+            (item) =>
+              item.id !== category.id &&
+              item.sellerId === req.user.id &&
+              String(item.name || "")
+                .trim()
+                .toLowerCase() ===
+                categoryName.toLowerCase()
+          );
+
+        if (duplicate) {
+          return res.status(409).json({
+            error:
+              "You already have a category with this name",
+          });
+        }
+
+        category.name =
+          categoryName;
+      }
+
+      if (description !== undefined) {
+        category.description =
+          String(description || "").trim();
+      }
+
+      category.updatedAt =
+        new Date().toISOString();
+
+      await db.categories.save(
+        categories
+      );
+
+      res.json({
+        category,
+      });
+    } catch (error) {
+      console.error(
+        "Update seller category error:",
+        error
+      );
+
+      res.status(500).json({
+        error: "Failed to update seller category",
+      });
+    }
+  }
+);
+
+app.delete(
+  "/api/seller/categories/:id",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const categories =
+        await db.categories.all();
+
+      const index =
+        categories.findIndex(
+          (category) =>
+            category.id ===
+              req.params.id &&
+            category.sellerId ===
+              req.user.id
+        );
+
+      if (index === -1) {
+        return res.status(404).json({
+          error: "Category not found",
+        });
+      }
+
+      const items =
+        await db.items.all();
+
+      const categoryId =
+        categories[index].id;
+
+      const usedBySeller =
+        items.some(
+          (item) =>
+            item.sellerId ===
+              req.user.id &&
+            item.categoryId ===
+              categoryId
+        );
+
+      if (usedBySeller) {
+        return res.status(409).json({
+          error:
+            "This category is being used by one or more products. Move those products to another category before deleting it.",
+        });
+      }
+
+      categories.splice(index, 1);
+
+      await db.categories.save(
+        categories
+      );
+
+      res.json({
+        success: true,
+      });
+    } catch (error) {
+      console.error(
+        "Delete seller category error:",
+        error
+      );
+
+      res.status(500).json({
+        error: "Failed to delete seller category",
+      });
+    }
+  }
+);
+
+// ============================================================
 // SELLER LISTINGS
 // ============================================================
 
@@ -2827,16 +3095,40 @@ app.post(
       }
 
       const {
-        title,
-        description = "",
-        price,
-        imageUrl = "",
-        categoryId = null,
-        quantity = 1,
-        accessLinks = [],
-        tonyixProductId = null,
-      } = req.body;
+  title,
+  description = "",
+  price,
+  imageUrl = "",
+  categoryId = null,
+  quantity = 1,
+  accessLinks = [],
+  tonyixProductId = null,
+} = req.body;
 
+let verifiedCategoryId = null;
+
+if (categoryId) {
+  const categories =
+    await db.categories.all();
+
+  const sellerCategory =
+    categories.find(
+      (category) =>
+        category.id ===
+          String(categoryId) &&
+        category.sellerId === user.id
+    );
+
+  if (!sellerCategory) {
+    return res.status(400).json({
+      error:
+        "Invalid category for your store",
+    });
+  }
+
+  verifiedCategoryId =
+    sellerCategory.id;
+}
       if (!title) {
         return res.status(400).json({
           error: "Title is required",
@@ -2867,7 +3159,8 @@ app.post(
 
         imageUrl,
 
-        categoryId,
+        categoryId:
+  verifiedCategoryId,
 
         quantity:
           quantity == null
