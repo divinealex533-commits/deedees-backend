@@ -4928,17 +4928,18 @@ app.post(
   async (req, res) => {
     try {
       const {
-        title,
-        name,
-        description,
-        price,
-        imageUrl,
-        image,
-        categoryId,
-        quantity,
-        accessLinks,
-        accessLink,
-      } = req.body;
+  title,
+  name,
+  description,
+  price,
+  imageUrl,
+  image,
+  categoryId,
+  quantity,
+  accessLinks,
+  accessLink,
+  tonyixProductId,
+} = req.body;
 
       const productName =
         String(title || name || "").trim();
@@ -4972,7 +4973,8 @@ app.post(
 
         price: priceNumber,
 
-        tonyixProductId: null,
+        tonyixProductId:
+  tonyixProductId ?? null,
 
         tonyixSupplierPrice: null,
 
