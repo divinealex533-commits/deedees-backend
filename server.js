@@ -4901,6 +4901,18 @@ app.put(
 );
 
 // ============================================================
+// SELLER OWNERSHIP HELPER
+// ============================================================
+
+function sellerOwnsProduct(item, userId) {
+  return (
+    item &&
+    item.ownerType === "seller" &&
+    String(item.ownerId) === String(userId)
+  );
+}
+
+// ============================================================
 // SELLER LISTINGS — FRONTEND COMPATIBILITY ROUTES
 // ============================================================
 
