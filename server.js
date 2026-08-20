@@ -7831,181 +7831,152 @@ app.get(
   requireAdmin,
   async (req, res) => {
     try {
-      const sellerId =
-        String(req.params.sellerId);
+      const sellerId = String(req.params.sellerId);
 
       const [
-  users,
-  storefronts,
-  items,
-  subscriptions,
-] = await Promise.all([
-  db.users.all(),
-  db.sellerStorefronts.all(),
-  db.items.all(),
-  db.sellerSubscriptions.all(),
-]);
+        users,
+        storefronts,
+        items,
+        subscriptions,
+      ] = await Promise.all([
+        db.users.all(),
+        db.sellerStorefronts.all(),
+        db.items.all(),
+        db.sellerSubscriptions.all(),
+      ]);
 
-const realSellerIds = new Set([
-  ...storefronts
-    .map((store) => store?.ownerId)
-    .filter(Boolean)
-    .map((id) => String(id)),
-
-  ...subscriptions
-    .map((subscription) => subscription?.userId)
-    .filter(Boolean)
-    .map((id) => String(id)),
-]);
-
-      const seller =
-        users.find(
-          (user) =>
-            String(user.id) ===
-            sellerId
-        );
+      const seller = users.find(
+        (user) =>
+          String(user.id) === sellerId
+      );
 
       if (!seller) {
         return res.status(404).json({
-          error:
-            "Reseller account not found",
+          error: "Reseller account not found",
         });
       }
 
-      if (
-        seller.isSeller !== true ||
-        seller.sellerTestMode === true
-      ) {
+      /*
+       * Admin inspection is allowed for seller-test accounts.
+       * A paid seller subscription is NOT required here.
+       */
+      if (seller.isSeller !== true) {
         return res.status(404).json({
-          error:
-            "Real reseller account not found",
+          error: "Seller account not found",
         });
       }
 
       const storefront =
         storefronts.find(
           (store) =>
-            String(store.ownerId) ===
-            sellerId
+            String(store.ownerId) === sellerId
         );
 
       if (!storefront) {
         return res.status(404).json({
-          error:
-            "Reseller storefront not found",
+          error: "Reseller storefront not found",
         });
       }
 
-      const sellers = users
-  .filter(
-    (user) =>
-      user?.sellerTestMode !== true &&
-      (
-        user?.isSeller === true ||
-        realSellerIds.has(
-          String(user?.id)
+      /*
+       * Only inspect listings belonging to THIS seller.
+       */
+      const sellerListings = items
+        .filter(
+          (item) =>
+            item.ownerType === "seller" &&
+            String(item.ownerId) === sellerId
         )
-      )
-  )
-          .map((item) => {
-            let stockCount = 0;
+        .map((item) => {
+          let stockCount = 0;
 
-            if (
+          if (
+            Array.isArray(item.accessLinks)
+          ) {
+            stockCount =
+              item.accessLinks.length;
+          } else if (
+            item.quantity != null
+          ) {
+            stockCount = Math.max(
+              0,
+              Number(item.quantity)
+            );
+          } else {
+            stockCount =
+              item.sold ? 0 : 1;
+          }
+
+          return {
+            id: item.id,
+
+            name:
+              item.name ||
+              item.title ||
+              "",
+
+            title:
+              item.title ||
+              item.name ||
+              "",
+
+            description:
+              item.description || "",
+
+            price:
+              Number(item.price || 0),
+
+            imageUrl:
+              item.imageUrl || "",
+
+            categoryId:
+              item.categoryId || null,
+
+            inStock:
+              item.inStock !== false,
+
+            sold:
+              item.sold === true,
+
+            quantity:
+              item.quantity != null
+                ? Number(item.quantity)
+                : null,
+
+            stockCount,
+
+            hasAccessLinks:
               Array.isArray(
                 item.accessLinks
-              )
-            ) {
-              stockCount =
-                item.accessLinks.length;
-            } else if (
-              item.quantity != null
-            ) {
-              stockCount =
-                Math.max(
-                  0,
-                  Number(
-                    item.quantity
-                  )
-                );
-            } else {
-              stockCount =
-                item.sold
-                  ? 0
-                  : 1;
-            }
+              ) &&
+              item.accessLinks.length > 0,
 
-            return {
-              id: item.id,
+            tonyixProductId:
+              item.tonyixProductId ?? null,
 
-              name:
-                item.name ||
-                item.title ||
-                "",
+            sellerStoreSlug:
+              item.sellerStoreSlug ||
+              storefront.slug ||
+              "",
 
-              title:
-                item.title ||
-                item.name ||
-                "",
+            sellerStoreName:
+              item.sellerStoreName ||
+              storefront.storeName ||
+              "",
 
-              description:
-                item.description ||
-                "",
+            createdAt:
+              item.createdAt || null,
 
-              price:
-                Number(item.price || 0),
+            updatedAt:
+              item.updatedAt || null,
+          };
+        });
 
-              imageUrl:
-                item.imageUrl ||
-                "",
-
-              categoryId:
-                item.categoryId ||
-                null,
-
-              inStock:
-                item.inStock !== false,
-
-              sold:
-                item.sold === true,
-
-              quantity:
-                item.quantity != null
-                  ? Number(
-                      item.quantity
-                    )
-                  : null,
-
-              stockCount,
-
-              hasAccessLinks:
-                Array.isArray(
-                  item.accessLinks
-                ) &&
-                item.accessLinks.length > 0,
-
-              tonyixProductId:
-                item.tonyixProductId ??
-                null,
-
-              sellerStoreSlug:
-                item.sellerStoreSlug ||
-                storefront.slug ||
-                "",
-
-              sellerStoreName:
-                item.sellerStoreName ||
-                storefront.storeName ||
-                "",
-
-              createdAt:
-                item.createdAt ||
-                null,
-
-              updatedAt:
-                item.updatedAt ||
-                null,
-            };
-          });
+      const subscription =
+        subscriptions.find(
+          (sub) =>
+            String(sub.userId) === sellerId
+        );
 
       return res.json({
         seller: {
@@ -8019,6 +7990,9 @@ const realSellerIds = new Set([
 
           isSeller:
             seller.isSeller === true,
+
+          sellerTestMode:
+            seller.sellerTestMode === true,
 
           sellerPlan:
             seller.sellerPlan ||
@@ -8039,6 +8013,9 @@ const realSellerIds = new Set([
           sellerFreezeReason:
             seller.sellerFreezeReason ||
             "",
+
+          subscription:
+            subscription || null,
         },
 
         storefront: {
@@ -8101,7 +8078,6 @@ const realSellerIds = new Set([
     }
   }
 );
-
 // ============================================================
 // ADMIN — UNFREEZE SELLER AFTER PAYMENT CONFIRMATION
 // ============================================================
